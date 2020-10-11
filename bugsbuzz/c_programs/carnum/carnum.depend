@@ -1,0 +1,6 @@
+# depslib dependency file v1.0
+1573382357 source:c:\dev\carnum\main.c
+	<stdio.h>
+	<string.h>
+	<ctype.h>
+

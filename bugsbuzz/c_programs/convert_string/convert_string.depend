@@ -1,0 +1,6 @@
+# depslib dependency file v1.0
+1573056726 source:c:\dev\convert_string\main.c
+	<stdio.h>
+	<string.h>
+	<ctype.h>
+

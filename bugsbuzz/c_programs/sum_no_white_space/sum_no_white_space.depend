@@ -1,0 +1,6 @@
+# depslib dependency file v1.0
+1573055687 source:c:\dev\sum_no_white_space\main.c
+	<stdio.h>
+	<string.h>
+	<ctype.h>
+

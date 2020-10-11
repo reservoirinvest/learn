@@ -1,0 +1,36 @@
+version: 1
+
+formatters:
+  fmt:
+    format: "%(asctime)-15s %(name)-5s %(levelname)-8s %(message)s"
+
+filters:
+  noConsoleFilter:
+    class: noConsoleFilter
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: fmt
+    filter: noConsoleFilter
+
+  msg_handler:
+    class: logging.FileHandler
+    level: INFO
+    filename: msg.log
+    formatter: fmt
+    
+  all_handler:
+    class: logging.FileHandler
+    level: DEBUG
+    filename: all.log
+    formatter: fmt
+
+loggers:
+  yml_logger:
+    handlers: [console, msg_handler, all_handler]
+    
+root:
+  level: DEBUG
+  handlers: [console, msg_handler]

@@ -1,0 +1,10 @@
+# depslib dependency file v1.0
+1574525909 source:c:\dev\movie_taste\movie_taste\main.c
+	<stdio.h>
+	<math.h>
+	<stdlib.h>
+
+1574515389 source:c:\dev\movie_taste\movie_taste\movie_taste.c
+	<stdio.h>
+	<math.h>
+
