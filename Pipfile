@@ -19,6 +19,8 @@ lxml = "*"
 ipython = "*"
 ipykernel = "*"
 plotly = "*"
+psutil = "*"
+kaleido = "*"
 
 [requires]
 python_version = "*"
