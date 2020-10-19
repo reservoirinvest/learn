@@ -5,6 +5,7 @@ verify_ssl = true
 
 [dev-packages]
 autopep8 = "*"
+black = "*"
 
 [packages]
 nbformat = "*"
@@ -21,6 +22,10 @@ ipykernel = "*"
 plotly = "*"
 psutil = "*"
 kaleido = "*"
+dash = "*"
 
 [requires]
 python_version = "*"
+
+[pipenv]
+allow_prereleases = true
