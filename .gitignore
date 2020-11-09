@@ -3,6 +3,7 @@
 .vs*/
 .env/
 .venv/
+*_env/
 **/.ipynb_checkpoints/
 __py*/
 z*/
