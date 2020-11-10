@@ -1,0 +1,82 @@
+---
+COMMON:
+  HOST: 127.0.0.1
+  CID: 0
+  MASTERCID: 10 # Master client for retrieving ALL (manual and API) orders and trades
+  FIRST_XN_TIMEOUT: 0 # timeout for first connection to IB 
+  BLK: 50
+  ACTIVE_STATUS:
+  - ApiPending
+  - PendingSubmit
+  - PreSubmitted
+  - Submitted
+NSE:
+  EXCHANGE: 'NSE'
+  CURRENCY: 'INR'
+  PORT: 3000
+  PAPER: 4004 # For paper trades in IBG
+  MINDTE: 1
+  MAXDTE: 50
+  CUSHION_LIMIT: 0.15 # Cushion should be greater than the cushion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
+  MARGIN_LIMIT: 0.7 # Initial margin should not be greater than 90% of NLV
+  POSN_LIMIT: 0.18 # Each symbol's market value should not be greater than 18% of NLV
+  BLACKLIST: # Ref: https://zerodha.com/margin-calculator/SPAN/
+  - RCOM
+  POSN_LIMIT: 0.10 # Each symbol's market value should not be greater than 18% of NLV
+  
+  # For edge
+  HONOUR_BREACH: False
+  ONLYPUTS: False
+  FALLRISE: False # Flag to use fall rise as band
+  HILO52: False # Flag to use hilo52 as band.
+  # If both FALLRISE & HILO52 are selected, best of both price will be taken.
+  PREC: 0.05
+
+  CALLSTDMULT: 1.8 # Min stdev multiple for calls
+  PUTSTDMULT: 1.8 # Min stdev multiple for puts
+  MINEXPROM: 1.5
+
+  MINROM: 0.2
+  MINOPTSELLPRICE: 0.5
+  MAXOPTQTY_SYM: 2 # Maximum option contract quantity per symbol to trade 
+
+SNP:
+  EXCHANGE: 'SMART'
+  CURRENCY: 'USD'
+  PORT: 1300
+  PAPER: 4002 # For paper trades in IBG
+  MINDTE: 1
+  MAXDTE: 45
+  CUSHION_LIMIT: 0.3 # Cushion should be greater than the custion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
+  MARGIN_LIMIT: 0.7 # Initial margin should not be greater than 70% of NLV
+  POSN_LIMIT: 0.04 # Each symbol's market value should not be greater than 4% of NLV
+
+  BLACKLIST:
+  - VXX
+  - RTN # RTN and UTX have merged
+  - GOOG # price too high!
+  - BKNG # price too high!
+  - AMZN # price too high!
+
+  # For edge
+  HONOUR_BREACH: True
+  ONLYPUTS: False
+  FALLRISE: False # Flag to use fall rise as band
+  HILO52: False # Flag to use hilo52 as band.
+  # If both FALLRISE & HILO52 are selected, best of both price will be taken.
+  PREC: 0.01
+
+  CALLSTDMULT: 2.1 # Min stdev multiple for calls
+  PUTSTDMULT: 2.8 #  Min stdev multiple for puts
+  MINEXPROM: 3.5
+
+  MINROM: 0.4
+  MINOPTSELLPRICE: 0.5
+  MAXOPTQTY_SYM: 1 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
+
+  SPECIALS: # Managed manually (outside automation)
+  - TSLA # for last hour shorts
+
+  COVERSD: 1.1 # For covered calls and puts
+  DEFEND_DTE: 30*6 # Min days for fresh protection / roll (e.g. 30 days x 6 months)
+  DEFEND_TH: 0.2 # Protection threshold. Underlying should be protected against 20% fall

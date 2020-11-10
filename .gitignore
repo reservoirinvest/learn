@@ -8,6 +8,7 @@
 __py*/
 z*/
 
+
 #...ignore the following files except the ones below with `!`
 tempCodeRunnerFile.py
 log/*.*
@@ -15,3 +16,9 @@ log/*.*
 **/.~lock*.*
 **/z*.*
 Untitled*.*
+ib/data/**/*.*
+
+# ... don't ignore
+!ib/data/**/.keep
+!ib/data/template/*.*
+
