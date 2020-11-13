@@ -3,7 +3,7 @@ COMMON:
   HOST: 127.0.0.1
   CID: 0
   MASTERCID: 10 # Master client for retrieving ALL (manual and API) orders and trades
-  FIRST_XN_TIMEOUT: 0 # timeout for first connection to IB 
+  FIRST_XN_TIMEOUT: 0.1 # timeout for first connection to IB 
   BLK: 50
   ACTIVE_STATUS:
   - ApiPending
