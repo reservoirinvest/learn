@@ -16,7 +16,7 @@ THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 VAR_YML = os.path.join(THIS_FOLDER, "var.yml")
 
 
-def dfrq(MARKET: str) -> pd.DataFrame:
+def get_dfrq(MARKET: str) -> pd.DataFrame:
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
     HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
@@ -111,7 +111,7 @@ def dfrq(MARKET: str) -> pd.DataFrame:
     dfrq.loc[(dfrq.remq == 0) & dfrq.grosspos.isnull(), 'remq'] = 1
 
     # * DERIVE STATUSES FROM PORTFOLIO
-    # * partials, fresh, undefended, uncovered, dodos (risky & uncovered), orphans, harvests and balanced
+    # * partials, fresh, undefended, uncovered, dodo (risky & uncovered), orphan, harvest and balanced
 
     # Partials: symbols whose long/short stock positions don't cover the lots
     m_partial = (df_pf.secType == 'STK') & (
@@ -140,41 +140,41 @@ def dfrq(MARKET: str) -> pd.DataFrame:
     df_uncovered = df_pf[m_uncovered]
     uncovered = sorted(df_uncovered.symbol.unique())
 
-    # Dodos: non-fresh, non-partial stock symbols that are neither covered and not protected
-    not_dodos = set(list(partials) + list(fresh) +
+    # dodo: non-fresh, non-partial stock symbols that are neither covered and not protected
+    not_dodo = set(list(partials) + list(fresh) +
                     list(undefended) + list(uncovered))
-    m_dodos = df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
-        ~df_pf.symbol.isin(not_dodos)
-    df_dodos = df_pf[m_dodos]
-    dodos = sorted(df_dodos.symbol.unique())
+    m_dodo = df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
+        ~df_pf.symbol.isin(not_dodo)
+    df_dodo = df_pf[m_dodo]
+    dodo = sorted(df_dodo.symbol.unique())
 
-    # Orphans: short calls and short longs not in `Fresh` and whithout underlying stocks
-    m_orphans = ~df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
+    # orphan: short calls and short longs not in `Fresh` and whithout underlying stocks
+    m_orphan = ~df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
         (~df_pf.symbol.isin(partials)) & \
         (df_pf.secType == 'OPT')
-    df_orphans = df_pf[m_orphans]
+    df_orphan = df_pf[m_orphan]
 
     # Keep only those longs without any ``compensating`` shorts.
     # ... this is done by grouping by symbols and adding the positions
-    # ... sumpos > 0 are orphans which can be set up with a short near its strike.
-    df_orphans = df_orphans.assign(
-        sumpos=df_orphans.groupby('symbol').position.transform(sum))
+    # ... sumpos > 0 are orphan which can be set up with a short near its strike.
+    df_orphan = df_orphan.assign(
+        sumpos=df_orphan.groupby('symbol').position.transform(sum))
 
-    df_orphans = df_orphans[df_orphans.sumpos > 0]
+    df_orphan = df_orphan[df_orphan.sumpos > 0]
 
-    orphans = sorted(df_orphans.symbol.unique())
+    orphan = sorted(df_orphan.symbol.unique())
 
-    # Harvests: the remaining symbols are the ones to be harvested
+    # harvest: the remaining symbols are the ones to be harvested
     # Note that this is reversed! First list and then the df!!
-    harvests = set(df_symlots.symbol.to_list()) - \
-        set(partials + fresh + undefended + uncovered + dodos + orphans)
-    df_harvests = df_pf[df_pf.symbol.isin(harvests)].sort_values('unPnL')
+    harvest = set(df_symlots.symbol.to_list()) - \
+        set(partials + fresh + undefended + uncovered + dodo + orphan)
+    df_harvest = df_pf[df_pf.symbol.isin(harvest)].sort_values('unPnL')
 
     # Build dictionary of statuses
     from collections import defaultdict
     y = defaultdict(list)
     status = {'partials': partials, 'fresh': fresh, 'undefended': undefended,
-              'uncovered': uncovered, 'dodos': dodos, 'orphans': orphans, 'harvests': harvests}
+              'uncovered': uncovered, 'dodo': dodo, 'orphan': orphan, 'harvest': harvest}
     for s in df_symlots.symbol.unique():
         for k, v in status.items():
             if s in v:
@@ -199,7 +199,7 @@ def dfrq(MARKET: str) -> pd.DataFrame:
 if __name__ == "__main__":
 
     # * SET THE VARIABLES
-    MARKET = "SNP"
+    MARKET = "NSE"
 
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
@@ -297,8 +297,8 @@ if __name__ == "__main__":
     # * DERIVE STATUSES FROM PORTFOLIO
     # * Statuses are:
     #     * partials, fresh, undefended, uncovered,
-    #     * dodos (risky & uncovered), orphans,
-    #     * harvests and balanced
+    #     * dodo (risky & uncovered), orphan,
+    #     * harvest and balanced
 
     # Partials: symbols whose long/short stock positions don't cover the lots
     m_partial = (df_pf.secType == 'STK') & (
@@ -327,41 +327,41 @@ if __name__ == "__main__":
     df_uncovered = df_pf[m_uncovered]
     uncovered = sorted(df_uncovered.symbol.unique())
 
-    # Dodos: non-fresh, non-partial stock symbols that are neither covered and not protected
-    not_dodos = set(list(partials) + list(fresh) +
+    # dodo: non-fresh, non-partial stock symbols that are neither covered and not protected
+    not_dodo = set(list(partials) + list(fresh) +
                     list(undefended) + list(uncovered))
-    m_dodos = df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
-        ~df_pf.symbol.isin(not_dodos)
-    df_dodos = df_pf[m_dodos]
-    dodos = sorted(df_dodos.symbol.unique())
+    m_dodo = df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
+        ~df_pf.symbol.isin(not_dodo)
+    df_dodo = df_pf[m_dodo]
+    dodo = sorted(df_dodo.symbol.unique())
 
-    # Orphans: short calls and short longs not in `Fresh` and whithout underlying stocks
-    m_orphans = ~df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
+    # orphan: short calls and short longs not in `Fresh` and whithout underlying stocks
+    m_orphan = ~df_pf.symbol.isin(df_pf[df_pf.secType == 'STK'].symbol) & \
         (~df_pf.symbol.isin(partials)) & \
         (df_pf.secType == 'OPT')
-    df_orphans = df_pf[m_orphans]
+    df_orphan = df_pf[m_orphan]
 
     # Keep only those longs without any ``compensating`` shorts.
     # ... this is done by grouping by symbols and adding the positions
-    # ... sumpos > 0 are orphans which can be set up with a short near its strike.
-    df_orphans = df_orphans.assign(
-        sumpos=df_orphans.groupby('symbol').position.transform(sum))
+    # ... sumpos > 0 are orphan which can be set up with a short near its strike.
+    df_orphan = df_orphan.assign(
+        sumpos=df_orphan.groupby('symbol').position.transform(sum))
 
-    df_orphans = df_orphans[df_orphans.sumpos > 0]
+    df_orphan = df_orphan[df_orphan.sumpos > 0]
 
-    orphans = sorted(df_orphans.symbol.unique())
+    orphan = sorted(df_orphan.symbol.unique())
 
-    # Harvests: the remaining symbols are the ones to be harvested
+    # harvest: the remaining symbols are the ones to be harvested
     # Note that this is reversed! First list and then the df!!
-    harvests = set(df_symlots.symbol.to_list()) - \
-        set(partials + fresh + undefended + uncovered + dodos + orphans)
-    df_harvests = df_pf[df_pf.symbol.isin(harvests)].sort_values('unPnL')
+    harvest = set(df_symlots.symbol.to_list()) - \
+        set(partials + fresh + undefended + uncovered + dodo + orphan)
+    df_harvest = df_pf[df_pf.symbol.isin(harvest)].sort_values('unPnL')
 
     # Build dictionary of statuses
     from collections import defaultdict
     y = defaultdict(list)
     status = {'partials': partials, 'fresh': fresh, 'undefended': undefended,
-              'uncovered': uncovered, 'dodos': dodos, 'orphans': orphans, 'harvests': harvests}
+              'uncovered': uncovered, 'dodo': dodo, 'orphan': orphan, 'harvest': harvest}
     for s in df_symlots.symbol.unique():
         for k, v in status.items():
             if s in v:
