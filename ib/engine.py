@@ -12,15 +12,459 @@ import numpy as np
 import pandas as pd
 import requests
 from ib_insync import IB, Contract, MarketOrder, Option, util
-from pandas.core.algorithms import isin
 
-from support import Timer, Vars, calcsd, calcsdmult_df, get_dte
+from support import Timer, Vars, get_dte
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 # ** SINGLE FUNCTIONS
 # * Independent functions - ready to be called.
 # .NSE df
+
+
+# .qualify
+async def qualify(ib: IB, c: Union[pd.Series, list, tuple, Contract]) -> pd.Series:
+
+    if isinstance(c, (list, pd.Series)):
+        result = await ib.qualifyContractsAsync(*c)
+
+    elif isinstance(c, tuple) & (c[1] is None):  # for contract qualification
+        result = await ib.qualifyContractsAsync(c[0])
+
+    elif isinstance(c, Contract):
+        result = await ib.qualifyContractsAsync(c)
+
+    else:
+        result = None
+
+    return pd.Series(result, name="contract", dtype=object)
+
+
+# .OHLC
+async def ohlc(ib: IB, c, DURATION: int = 365, OHLC_DELAY: int = 5) -> pd.DataFrame:
+
+    if isinstance(c, tuple):
+        c = c[0]
+
+    ohlc = await ib.reqHistoricalDataAsync(
+        contract=c,
+        endDateTime="",
+        durationStr=str(DURATION) + " D",
+        barSizeSetting="1 day",
+        whatToShow="Trades",
+        useRTH=True,
+    )
+    await asyncio.sleep(OHLC_DELAY)
+    df = util.df(ohlc)
+    try:
+        df.insert(0, "symbol", c.symbol)
+    except AttributeError:
+        df = None
+    return df
+
+
+# .Underlying
+async def und(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
+    """Use CONCURRENT=40, TMEOUT=8 for optimal executeAsync results"""
+
+    if isinstance(c, tuple):
+        c = c[0]
+
+    tick = ib.reqMktData(c, "456, 104, 106, 100, 101, 165", snapshot=False)
+    await asyncio.sleep(FILL_DELAY)
+
+    try:
+        undPrice = next(x for x in (tick.last, tick.close)
+                        if not math.isnan(x))
+    except Exception as e:
+        print(f"undPrice not found in {tick.contract.symbol}. Error: {e}")
+        undPrice = None
+
+    m_df = pd.DataFrame(util.df([tick]))
+    m_df["undPrice"] = undPrice
+
+    div_df = pd.DataFrame(m_df.dividends.tolist())
+    df1 = m_df.drop("dividends", 1).join(div_df)
+    df1.insert(0, "symbol", [c.symbol for c in df1.contract])
+    df1.insert(1, "secType", [c.secType for c in df1.contract])
+
+    df2 = df1.dropna(axis=1)
+
+    # Extract columns with legit values in them
+    df3 = df2[[c for c in df2.columns if df2.loc[0, c]]].reset_index(drop=True)
+
+    # . Implied volatility correction
+
+    # rename column
+    df3.rename(columns={"impliedVolatility": "iv"}, inplace=True)
+
+    ib.cancelMktData(c)
+
+    return df3
+
+
+# .Chain
+async def chain(ib: IB, c) -> pd.DataFrame:
+
+    if isinstance(c, tuple):
+        c = c[0]
+
+    chains = await ib.reqSecDefOptParamsAsync(
+        underlyingSymbol=c.symbol,
+        futFopExchange="",
+        underlyingSecType=c.secType,
+        underlyingConId=c.conId,
+    )
+
+    # Pick up one chain if it is a list
+
+    try:
+        chain = chains[0] if isinstance(chains, list) else chains
+    except IndexError as ie:
+        print(f"\nThere is something wrong in chain for {c.symbol}: {ie}\n")
+        df = pd.DataFrame([])
+        return df  # ! Abort chain generation
+
+    df1 = pd.DataFrame([chain])
+
+    # Do a cartesian merge
+    df2 = (
+        pd.merge(
+            pd.DataFrame(df1.expirations[0], columns=["expiry"]).assign(key=1),
+            pd.DataFrame(df1.strikes[0], columns=["strike"]).assign(key=1),
+            on="key",
+        )
+        .merge(df1.assign(key=1))
+        .rename(columns={"tradingClass": "symbol", "multiplier": "mult"})[
+            ["symbol", "expiry", "strike", "exchange", "mult"]
+        ]
+    )
+
+    # Replace tradingclass to reflect correct symbol name of 9 characters
+    df2 = df2.assign(symbol=df2.symbol.str[:9])
+
+    # convert & to %26
+    df2 = df2.assign(symbol=df2.symbol.str.replace("&", "%26"))
+
+    # convert symbols - friendly to IBKR
+    df2 = df2.assign(symbol=df2.symbol.str.slice(0, 9))
+    ntoi = {"M%26M": "MM", "M%26MFIN": "MMFIN",
+            "L%26TFH": "LTFH", "NIFTY": "NIFTY50"}
+    df2.symbol = df2.symbol.replace(ntoi)
+
+    # Get the dte
+    df2["dte"] = df2.expiry.apply(get_dte)
+
+    df2.loc[df2.dte <= 0, "dte"] = 1  # Make dte = 1 for last day
+
+    return df2
+
+
+# .Price
+async def price(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
+    """Price coro. Use CONCURRENT=40, TMEOUT=8 for optimal executeAsync results"""
+
+    if isinstance(c, tuple):
+        c = c[0]
+
+    tick = ib.reqMktData(c, genericTickList="106")
+
+    await asyncio.sleep(FILL_DELAY)
+
+    try:
+        dfpr = util.df([tick])
+        dfpr["symbol"] = c.symbol
+        dfpr["secType"] = c.secType
+        dfpr["localSymbol"] = c.localSymbol
+        dfpr["conId"] = c.conId
+        dfpr["contract"] = c
+        dfpr["strike"] = c.strike
+        dfpr["expiry"] = c.lastTradeDateOrContractMonth
+        dfpr["right"] = c.right
+        dfpr["bid"] = dfpr.bid
+        dfpr["ask"] = dfpr.ask
+        dfpr["close"] = dfpr.close
+        dfpr["last"] = dfpr["last"]
+        dfpr["price"] = dfpr["last"].combine_first(dfpr["close"])
+        dfpr["time"] = dfpr.time
+        dfpr["model"] = dfpr.modelGreeks
+        if dfpr.model[0] is None:
+            dfpr["iv"] = dfpr.impliedVolatility
+        else:
+            dfpr["iv"] = dfpr.model[0].impliedVol
+
+    except AttributeError as e:
+
+        print(f"\nError in {c.localSymbol}: {e}. df will be empty!\n")
+
+        # return empty price df
+        dfpr = pd.DataFrame([])  # initialize empty df
+
+        dfpr["symbol"] = c.symbol
+        dfpr["secType"] = c.secType
+        dfpr["localSymbol"] = c.localSymbol
+        dfpr["conId"] = c.conId
+        dfpr["contract"] = c
+        dfpr["strike"] = c.strike
+        dfpr["expiry"] = c.lastTradeDateOrContractMonth
+        dfpr["right"] = c.right
+        dfpr["bid"] = np.nan
+        dfpr["ask"] = np.nan
+        dfpr["close"] = np.nan
+        dfpr["last"] = np.nan
+        dfpr["price"] = np.nan
+        dfpr["iv"] = np.nan
+        dfpr["time"] = np.nan
+        dfpr["model"] = None
+
+    cols = [
+        "symbol",
+        "secType",
+        "localSymbol",
+        "conId",
+        "strike",
+        "expiry",
+        "right",
+        "contract",
+        "time",
+        "model",
+        "bid",
+        "ask",
+        "close",
+        "last",
+        "price",
+        "iv",
+    ]
+
+    ib.cancelMktData(c)
+
+    return dfpr[cols]
+
+
+# .Margin
+async def margin(ib: IB, c) -> pd.DataFrame:
+
+    ct, o = c
+
+    async def wifAsync(ct, o):
+        wif = ib.whatIfOrderAsync(ct, o)
+        await asyncio.sleep(0)
+        return wif
+
+    wifs = await ib.whatIfOrderAsync(ct, o)
+
+    try:
+        df_wifs = pd.DataFrame([vars(wifs)])[
+            ["initMarginChange", "maxCommission", "commission"]
+        ]
+        df_wifs = df_wifs.assign(conId=ct.conId, localSymbol=ct.localSymbol)
+        df_wifs = df_wifs.assign(
+            comm=df_wifs[["commission", "maxCommission"]].min(axis=1),
+            margin=df_wifs.initMarginChange.astype("float"),
+        )
+        df_margin = df_wifs[["conId", "localSymbol", "margin", "comm"]]
+        df_margin = df_margin.assign(
+            margin=np.where(df_margin.margin > 1e7, np.nan, df_margin.margin),
+            comm=np.where(df_margin.comm > 1e7, np.nan, df_margin.comm),
+        )
+    except TypeError as e:
+        print(
+            f"\nTypeError: Something is wrong with contract: {c}, order: {0} !\n")
+        df_margin = pd.DataFrame(
+            [
+                {
+                    "conId": ct.conId,
+                    "localSymbol": ct.localSymbol,
+                    "margin": np.nan,
+                    "comm": np.nan,
+                }
+            ]
+        )
+
+    df_margin.insert(2, "secType", ct.secType)
+
+    return df_margin
+
+
+# ** EXECUTION
+# * Core engine that processes functions and delivers results
+
+# .preprocessing data for the core engine
+def pre_process(cts):
+    """Generates tuples for input to the engine"""
+
+    try:
+        symbol = cts.symbol
+        output = ((cts, None),)
+
+    except AttributeError as ae1:  # it's an iterable!
+        try:
+            symbols = [c.symbol for c in cts]
+
+            if len(symbols) == 1:
+                output = ((cts[0], None),)
+            else:
+                output = ((c, None) for c in cts)
+
+        except AttributeError as ae2:  # 2nd value is MarketOrder!
+            try:
+                output = tuple(cts)
+            except:
+                print(f"Unknown error in {ae2}")
+                output = None
+
+    return tuple(output)
+
+
+# .make name for symbol being processed by the engine
+def make_name(cts):
+    """Generates name for contract(s)"""
+    try:
+        output = [
+            c.symbol
+            + c.lastTradeDateOrContractMonth[-4:]
+            + c.right
+            + str(c.strike)
+            + ".."
+            for c in cts
+        ]
+
+    except TypeError as te:  # single non-iterable element
+        if cts:  # not empty!
+            output = (
+                cts.symbol
+                + cts.lastTradeDateOrContractMonth[-4:]
+                + cts.right
+                + str(cts.strike)
+            )
+        else:
+            output = cts
+
+    except AttributeError as ae1:  # multiple (p, s) combination
+        try:
+            output = [
+                c[0].symbol
+                + c[0].lastTradeDateOrContractMonth[-4:]
+                + c[0].right
+                + str(c[0].strike)
+                + ".."
+                for c in cts
+            ]
+        except TypeError as ae2:
+            output = (
+                cts[0].symbol
+                + cts[0].lastTradeDateOrContractMonth[-4:]
+                + cts[0].right
+                + str(cts[0].strike)
+            )
+
+    return output
+
+
+# .the core engine
+async def executeAsync(
+    ib: IB(),
+    algo: Callable[..., Coroutine],  # coro name
+    cts: Union[Contract, pd.Series, list, tuple],  # list of contracts
+    post_process: Callable[
+        [set, pathlib.Path, str], pd.DataFrame
+    ] = None,  # If checkpoint is needed
+    DATAPATH: pathlib.Path = None,  # Necessary for post_process
+    CONCURRENT: int = 40,  # adjust to prevent overflows
+    TIMEOUT: None = None,  # if None, no progress messages shown
+    OP_FILENAME: str = "",  # output file name
+    **kwargs,  # keyword inputs for algo
+):
+
+    tasks = set()
+    results = set()
+    remaining = pre_process(cts)
+    last_len_tasks = 0  # tracking last length for error catch
+
+    # Get the results
+    while len(remaining):
+
+        # Tasks limited by concurrency
+        if len(remaining) <= CONCURRENT:
+
+            tasks.update(
+                asyncio.create_task(algo(ib, c, **kwargs), name=make_name(c))
+                for c in remaining
+            )
+
+        else:
+
+            tasks.update(
+                asyncio.create_task(algo(ib, c, **kwargs), name=make_name(c))
+                for c in remaining[:CONCURRENT]
+            )
+
+        # Execute tasks
+        while len(tasks):
+
+            done, tasks = await asyncio.wait(
+                tasks, timeout=TIMEOUT, return_when=asyncio.ALL_COMPLETED
+            )
+
+            # Remove dones from remaining
+            done_names = [d.get_name() for d in done]
+            remaining = [c for c in remaining if make_name(
+                c) not in done_names]
+
+            # Update results and checkpoint
+            results.update(done)
+
+            # Checkpoint the results
+            if post_process:
+                output = post_process(results, DATAPATH, OP_FILENAME)
+            else:
+                output = results
+
+            if TIMEOUT:
+                if remaining:
+                    print(
+                        f"\nDone {algo.__name__} for {done_names[:2]} {len(results)} out of {len(cts)}. Pending {[make_name(c) for c in remaining][:2]}"
+                    )
+
+                # something wrong. Task is not progressing
+                if (len(tasks) == last_len_tasks) & (len(tasks) > 0):
+                    print(
+                        f"\n @ ALERT @: Tasks are not progressing. Pending tasks will be killed in 5 seconds !\n"
+                    )
+                    dn, pend = await asyncio.wait(tasks, timeout=5.0)
+                    if len(dn) > 0:
+                        results.update(dn)
+
+                    tasks.difference_update(dn)
+                    tasks.difference_update(pend)
+
+                    pend_names = [p.get_name() for p in pend]
+                    # remove pending from remaining
+                    remaining = [c for c in remaining if make_name(
+                        c) not in pend_names]
+
+                # re-initialize last length of tasks
+                last_len_tasks = len(tasks)
+
+    return output
+
+
+# .Process output into dataframes
+def save_df(
+    results: set, DATAPATH: pathlib.Path, file_name: str = ""
+) -> pd.DataFrame():
+
+    if results:
+        df = pd.concat([r.result() for r in results if r], ignore_index=True)
+        if file_name:
+            df.to_pickle(DATAPATH.joinpath(file_name))
+    else:
+        df = pd.DataFrame([])  # results are not yet ready!
+    return df
+
+
+# ** ACTIVITIES
+# * Function calls to achieve specific results
 
 
 async def get_nse() -> pd.DataFrame:
@@ -180,497 +624,21 @@ async def get_snp(ib: IB) -> pd.DataFrame():
     return df_syms
 
 
-# .qualify
-async def qualify(ib: IB, c: Union[pd.Series, list, tuple, Contract]) -> pd.Series:
-
-    if isinstance(c, (list, pd.Series)):
-        result = await ib.qualifyContractsAsync(*c)
-
-    elif isinstance(c, tuple) & (c[1] is None):  # for contract qualification
-        result = await ib.qualifyContractsAsync(c[0])
-
-    elif isinstance(c, Contract):
-        result = await ib.qualifyContractsAsync(c)
-
-    else:
-        result = None
-
-    return pd.Series(result, name="contract", dtype=object)
-
-
-# .OHLC
-async def ohlc(ib: IB, c, DURATION: int = 365, OHLC_DELAY: int = 5) -> pd.DataFrame:
-
-    if isinstance(c, tuple):
-        c = c[0]
-
-    ohlc = await ib.reqHistoricalDataAsync(
-        contract=c,
-        endDateTime="",
-        durationStr=str(DURATION) + " D",
-        barSizeSetting="1 day",
-        whatToShow="Trades",
-        useRTH=True,
-    )
-    await asyncio.sleep(OHLC_DELAY)
-    df = util.df(ohlc)
-    try:
-        df.insert(0, "symbol", c.symbol)
-    except AttributeError:
-        df = None
-    return df
-
-
-# .Underlying
-async def und(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
-    """Use CONCURRENT=40, TMEOUT=8 for optimal executeAsync results"""
-
-    if isinstance(c, tuple):
-        c = c[0]
-
-    tick = ib.reqMktData(c, "456, 104, 106, 100, 101, 165", snapshot=False)
-    await asyncio.sleep(FILL_DELAY)
-
-    try:
-        undPrice = next(x for x in (tick.last, tick.close)
-                        if not math.isnan(x))
-    except Exception as e:
-        print(f"undPrice not found in {tick.contract.symbol}. Error: {e}")
-        undPrice = None
-
-    m_df = pd.DataFrame(util.df([tick]))
-    m_df["undPrice"] = undPrice
-
-    div_df = pd.DataFrame(m_df.dividends.tolist())
-    df1 = m_df.drop("dividends", 1).join(div_df)
-    df1.insert(0, "symbol", [c.symbol for c in df1.contract])
-    df1.insert(1, "secType", [c.secType for c in df1.contract])
-
-    df2 = df1.dropna(axis=1)
-
-    # Extract columns with legit values in them
-    df3 = df2[[c for c in df2.columns if df2.loc[0, c]]]
-
-    # . Implied volatility correction
-
-    # rename column
-    df3.rename(columns={"impliedVolatility": "iv"}, inplace=True)
-
-    ib.cancelMktData(c)
-
-    return df3
-
-
-# .Chain
-async def chain(ib: IB, c) -> pd.DataFrame:
-
-    if isinstance(c, tuple):
-        c = c[0]
-
-    chains = await ib.reqSecDefOptParamsAsync(
-        underlyingSymbol=c.symbol,
-        futFopExchange="",
-        underlyingSecType=c.secType,
-        underlyingConId=c.conId,
-    )
-
-    # Pick up one chain if it is a list
-    chain = chains[0] if isinstance(chains, list) else chains
-
-    df1 = pd.DataFrame([chain])
-
-    # Do a cartesian merge
-    df2 = (
-        pd.merge(
-            pd.DataFrame(df1.expirations[0], columns=["expiry"]).assign(key=1),
-            pd.DataFrame(df1.strikes[0], columns=["strike"]).assign(key=1),
-            on="key",
-        )
-        .merge(df1.assign(key=1))
-        .rename(columns={"tradingClass": "symbol", "multiplier": "mult"})[
-            ["symbol", "expiry", "strike", "exchange", "mult"]
-        ]
-    )
-
-    # Replace tradingclass to reflect correct symbol name of 9 characters
-    df2 = df2.assign(symbol=df2.symbol.str[:9])
-
-    # convert & to %26
-    df2 = df2.assign(symbol=df2.symbol.str.replace("&", "%26"))
-
-    # convert symbols - friendly to IBKR
-    df2 = df2.assign(symbol=df2.symbol.str.slice(0, 9))
-    ntoi = {"M%26M": "MM", "M%26MFIN": "MMFIN",
-            "L%26TFH": "LTFH", "NIFTY": "NIFTY50"}
-    df2.symbol = df2.symbol.replace(ntoi)
-
-    # Get the dte
-    df2["dte"] = df2.expiry.apply(get_dte)
-
-    df2.loc[df2.dte <= 0, "dte"] = 1  # Make dte = 1 for last day
-
-    return df2
-
-
-# .Price
-async def price(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
-    """Price coro. Use CONCURRENT=40, TMEOUT=8 for optimal executeAsync results"""
-
-    if isinstance(c, tuple):
-        c = c[0]
-
-    tick = ib.reqMktData(c, genericTickList="106")
-
-    await asyncio.sleep(FILL_DELAY)
-
-    try:
-        dfpr = util.df([tick])
-        dfpr["symbol"] = c.symbol
-        dfpr["secType"] = c.secType
-        dfpr["localSymbol"] = c.localSymbol
-        dfpr["conId"] = c.conId
-        dfpr["contract"] = c
-        dfpr["strike"] = c.strike
-        dfpr["expiry"] = c.lastTradeDateOrContractMonth
-        dfpr["right"] = c.right
-        dfpr["bid"] = dfpr.bid
-        dfpr["ask"] = dfpr.ask
-        dfpr["close"] = dfpr.close
-        dfpr["last"] = dfpr["last"]
-        dfpr["price"] = dfpr["last"].combine_first(dfpr["close"])
-        dfpr["time"] = dfpr.time
-        dfpr["model"] = dfpr.modelGreeks
-        if dfpr.model[0] is None:
-            dfpr["iv"] = dfpr.impliedVolatility
-        else:
-            dfpr["iv"] = dfpr.model[0].impliedVol
-
-    except AttributeError as e:
-
-        print(f"\nError in {c.localSymbol}: {e}. df will be empty!\n")
-
-        # return empty price df
-        dfpr = pd.DataFrame([])  # initialize empty df
-
-        dfpr["symbol"] = c.symbol
-        dfpr["secType"] = c.secType
-        dfpr["localSymbol"] = c.localSymbol
-        dfpr["conId"] = c.conId
-        dfpr["contract"] = c
-        dfpr["strike"] = c.strike
-        dfpr["expiry"] = c.lastTradeDateOrContractMonth
-        dfpr["right"] = c.right
-        dfpr["bid"] = np.nan
-        dfpr["ask"] = np.nan
-        dfpr["close"] = np.nan
-        dfpr["last"] = np.nan
-        dfpr["price"] = np.nan
-        dfpr["iv"] = np.nan
-        dfpr["time"] = np.nan
-        dfpr["model"] = None
-
-    cols = [
-        "symbol",
-        "secType",
-        "localSymbol",
-        "conId",
-        "strike",
-        "expiry",
-        "right",
-        "contract",
-        "time",
-        "model",
-        "bid",
-        "ask",
-        "close",
-        "last",
-        "price",
-        "iv",
-    ]
-
-    ib.cancelMktData(c)
-
-    return dfpr[cols]
-
-
-# .Margin
-async def margin(ib: IB, c) -> pd.DataFrame:
-
-    ct, o = c
-
-    async def wifAsync(ct, o):
-        wif = ib.whatIfOrderAsync(ct, o)
-        await asyncio.sleep(0)
-        return wif
-
-    if isinstance(c, tuple):
-        wifs = await ib.whatIfOrderAsync(ct, o)
-
-        df_wifs = pd.DataFrame([vars(wifs)])[
-            ["initMarginChange", "maxCommission", "commission"]
-        ]
-        df_wifs = df_wifs.assign(conId=ct.conId, localSymbol=ct.localSymbol)
-        df_wifs = df_wifs.assign(
-            comm=df_wifs[["commission", "maxCommission"]].min(axis=1),
-            margin=df_wifs.initMarginChange.astype("float"),
-        )
-        df_margin = df_wifs[["conId", "localSymbol", "margin", "comm"]]
-        df_margin = df_margin.assign(
-            margin=np.where(df_margin.margin > 1e7, np.nan, df_margin.margin),
-            comm=np.where(df_margin.comm > 1e7, np.nan, df_margin.comm),
-        )
-    else:
-        print(f"\nContract type of {c} is not tuple(c, o) !\n")
-        df_margin = pd.DataFrame(
-            [
-                {
-                    "conId": ct.conId,
-                    "localSymbol": ct.localSymbol,
-                    "margin": np.nan,
-                    "comm": np.nan,
-                }
-            ]
-        )
-
-    df_margin.insert(2, "secType", ct.secType)
-
-    return df_margin
-
-
-# . Prepare raw options
-def prepOpts(MARKET: str) -> list:
-    """Prepare raw options for qualification"""
-
-    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
-
-    ibp = Vars(MARKET)
-    MAXDTE, MINDTE, CALLSTDMULT, PUTSTDMULT = (
-        ibp.MAXDTE,
-        ibp.MINDTE,
-        ibp.CALLSTDMULT,
-        ibp.PUTSTDMULT,
-    )
-
-    # ... read the chains and unds
-    df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
-    df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
-
-    # ... weed out chains within MIN and outside MAX dte
-    df_ch = df_chains[
-        df_chains.dte.between(MINDTE, MAXDTE, inclusive=True)
-    ].reset_index(drop=True)
-
-    # ... get the undPrice and volatility
-    df_u1 = df_unds[["symbol", "undPrice", "iv"]]
-
-    # ... integrate undPrice and volatility to df_ch
-    df_ch = df_ch.set_index("symbol").join(
-        df_u1.set_index("symbol")).reset_index()
-
-    # ...compute one standard deviation and mask out chains witin the fence
-    df_ch = df_ch.assign(
-        sd1=df_ch.undPrice * df_ch.iv * (df_ch.dte / 365).apply(math.sqrt)
-    )
-
-    fence_mask = (df_ch.strike > df_ch.undPrice + df_ch.sd1 * CALLSTDMULT) | (
-        df_ch.strike < df_ch.undPrice - df_ch.sd1 * PUTSTDMULT
-    )
-
-    df_ch1 = df_ch[fence_mask].reset_index(drop=True)
-
-    # ... identify puts and the calls
-    df_ch1.insert(3, "right", np.where(
-        df_ch1.strike < df_ch1.undPrice, "P", "C"))
-
-    # ... remove duplicates, if any
-    df_ch1 = df_ch1.drop_duplicates(
-        subset=["symbol", "expiry", "strike", "right"])
-
-    # ... build the options
-    opts = [
-        Option(s, e, k, r, x)
-        for s, e, k, r, x in zip(
-            df_ch1.symbol,
-            df_ch1.expiry,
-            df_ch1.strike,
-            df_ch1.right,
-            ["NSE" if MARKET.upper() == "NSE" else "SMART"] * len(df_ch1),
-        )
-    ]
-
-    return opts
-
-
-# ** EXECUTION
-# * Core engine that processes functions and delivers results
-
-# .preprocessing data for the core engine
-def pre_process(cts):
-    """Generates tuples for input to the engine"""
-
-    try:
-        symbol = cts.symbol
-        output = (cts, None),
-
-    except AttributeError as ae1:  # it's an iterable!
-        try:
-            symbols = [c.symbol for c in cts]
-
-            if len(symbols) == 1:
-                output = (cts[0], None),
-            else:
-                output = ((c, None) for c in cts)
-
-        except AttributeError as ae2:  # 2nd value is MarketOrder!
-            try:
-                output = tuple(cts)
-            except:
-                print(f'Unknown error in {ae2}')
-                output = None
-
-    return tuple(output)
-
-
-# .make name for symbol being processed by the engine
-def make_name(cts):
-    """Generates name for contract(s)"""
-    try:
-        output = [c.symbol + c.lastTradeDateOrContractMonth[-4:] +
-                  c.right + str(c.strike) + '..' for c in cts]
-
-    except TypeError as te:  # single non-iterable element
-        if cts:  # not empty!
-            output = cts.symbol + cts.lastTradeDateOrContractMonth[-4:] + \
-                cts.right + str(cts.strike)
-        else:
-            output = cts
-
-    except AttributeError as ae1:  # multiple (p, s) combination
-        try:
-            output = [c[0].symbol + c[0].lastTradeDateOrContractMonth[-4:] +
-                      c[0].right + str(c[0].strike) + '..' for c in cts]
-        except TypeError as ae2:
-            output = cts[0].symbol + cts[0].lastTradeDateOrContractMonth[-4:] +\
-                cts[0].right + str(cts[0].strike)
-
-    return output
-
-
-# .the core engine
-async def executeAsync(
-    ib: IB(),
-    algo: Callable[..., Coroutine],  # coro name
-    cts: Union[Contract, pd.Series, list, tuple],  # list of contracts
-    post_process: Callable[
-        [set, pathlib.Path, str], pd.DataFrame
-    ] = None,  # If checkpoint is needed
-    DATAPATH: pathlib.Path = None,  # Necessary for post_process
-    CONCURRENT: int = 40,  # adjust to prevent overflows
-    TIMEOUT: None = None,  # if None, no progress messages shown
-    OP_FILENAME: str = "",  # output file name
-    **kwargs,  # keyword inputs for algo
-):
-
-    tasks = set()
-    results = set()
-    remaining = pre_process(cts)
-    last_len_tasks = 0  # tracking last length for error catch
-
-    # Get the results
-    while len(remaining):
-
-        # Tasks limited by concurrency
-        if len(remaining) <= CONCURRENT:
-
-            tasks.update(
-                asyncio.create_task(
-                    algo(ib, c, **kwargs), name=make_name(c))
-                for c in remaining
-            )
-
-        else:
-
-            tasks.update(
-                asyncio.create_task(algo(ib, c, **kwargs), name=make_name(c))
-                for c in remaining[:CONCURRENT]
-            )
-
-        # Execute tasks
-        while len(tasks):
-
-            done, tasks = await asyncio.wait(
-                tasks, timeout=TIMEOUT, return_when=asyncio.ALL_COMPLETED
-            )
-
-            # Remove dones from remaining
-            done_names = [d.get_name() for d in done]
-            remaining = [c for c in remaining if make_name(
-                c) not in done_names]
-
-            # Update results and checkpoint
-            results.update(done)
-
-            # Checkpoint the results
-            if post_process:
-                output = post_process(results, DATAPATH, OP_FILENAME)
-            else:
-                output = results
-
-            if TIMEOUT:
-                if remaining:
-                    print(
-                        f"\nDone {algo.__name__} for {done_names[:2]} {len(results)} out of {len(cts)}. Pending {[make_name(c) for c in remaining][:2]}"
-                    )
-
-                # something wrong. Task is not progressing
-                if (len(tasks) == last_len_tasks) & (len(tasks) > 0):
-                    print(
-                        f"\n @ ALERT @: Tasks are not progressing. Pending tasks will be killed in 5 seconds !\n"
-                    )
-                    dn, pend = await asyncio.wait(tasks, timeout=5.0)
-                    if len(dn) > 0:
-                        results.update(dn)
-
-                    tasks.difference_update(dn)
-                    tasks.difference_update(pend)
-
-                    pend_names = [p.get_name() for p in pend]
-                    # remove pending from remaining
-                    remaining = [c for c in remaining
-                                 if make_name(c) not in pend_names]
-
-                # re-initialize last length of tasks
-                last_len_tasks = len(tasks)
-
-    return output
-
-
-# .Process output into dataframes
-def save_df(
-    results: set, DATAPATH: pathlib.Path, file_name: str = ""
-) -> pd.DataFrame():
-
-    if results:
-        df = pd.concat([r.result() for r in results if r], ignore_index=True)
-        if file_name:
-            df.to_pickle(DATAPATH.joinpath(file_name))
-    else:
-        df = pd.DataFrame([])  # results are not yet ready!
-    return df
-
-
-# ** ACTIVITIES
-# * Function calls to achieve specific results
-
 # .. generate symbols and lots
-def get_symlots(MARKET: str) -> pd.DataFrame:
+def get_symlots(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
     u_qual_time = Timer(MARKET.lower() + "_und_qual")
     u_qual_time.start()
 
     # ... set parameters from var.yml
+
     ibp = Vars(MARKET.upper())
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
     # * GET THE SYMLOTS
@@ -725,14 +693,22 @@ def get_symlots(MARKET: str) -> pd.DataFrame:
 
 
 # .. generate ohlcs for symlots
-def get_ohlcs(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
+def get_ohlcs(
+    MARKET: str, und_cts: list, savedf: bool, RUN_ON_PAPER: bool = False
+) -> pd.DataFrame:
 
     ohlc_time = Timer(MARKET.lower() + "_ohlcs")
     ohlc_time.start()
 
     # ... set parameters from var.yml
     ibp = Vars(MARKET.upper())
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
     if savedf:
@@ -760,14 +736,22 @@ def get_ohlcs(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
 
 
 # .. generate underlyings df from symlots
-def get_unds(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
+def get_unds(
+    MARKET: str, und_cts: list, savedf: bool = False, RUN_ON_PAPER: bool = False
+) -> pd.DataFrame:
 
     und_time = Timer(MARKET.lower() + "_unds")
     und_time.start()
 
     # ... set parameters from var.yml
     ibp = Vars(MARKET.upper())
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
     if savedf:
@@ -781,7 +765,7 @@ def get_unds(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
                 ib=ib,
                 algo=und,
                 cts=und_cts,
-                CONCURRENT=40,
+                CONCURRENT=39,
                 TIMEOUT=8,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
@@ -794,14 +778,22 @@ def get_unds(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
 
 
 # .. get chains from symlots
-def get_chains(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
+def get_chains(
+    MARKET: str, und_cts: list, savedf: bool, RUN_ON_PAPER: bool = False
+) -> pd.DataFrame:
 
     chain_time = Timer(MARKET.lower() + "_chains")
     chain_time.start()
 
     # ... set parameters from var.yml
     ibp = Vars(MARKET.upper())
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
     # ... for integrating lots to chains
@@ -849,17 +841,25 @@ def get_chains(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
 
 
 # .. get underlying margins
-def get_und_margins(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
+def get_und_margins(
+    MARKET: str, und_cts: list, savedf: bool = False, RUN_ON_PAPER: bool = False
+) -> pd.DataFrame:
 
-    und_mgn_time = Timer(MARKET.lower() + "und_margins")
+    und_mgn_time = Timer(MARKET.lower() + "_und_margins")
     und_mgn_time.start()
 
     # ... set parameters from var.yml
     ibp = Vars(MARKET.upper())
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
-    df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
+    df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
 
     if savedf:
         OP_FILENAME = "df_und_margins.pkl"
@@ -880,7 +880,7 @@ def get_und_margins(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
                 ib=ib,
                 algo=margin,
                 cts=und_cos,
-                CONCURRENT=150,
+                CONCURRENT=100,
                 TIMEOUT=8,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
@@ -892,14 +892,154 @@ def get_und_margins(MARKET: str, und_cts: list, savedf: bool) -> pd.DataFrame:
     return df_und_margins
 
 
-if __name__ == "__main__":
-
-    # * SET THE VARIABLES
-    MARKET = "SNP"
-
+# . generate and qualify options
+def qualify_opts(
+    MARKET: str,
+    RUN_ON_PAPER: bool = True,  # Use PAPER account
+    REUSE: bool = True,  # Reuse old df_opts, if available
+    OP_FILENAME: str = "qopts.pkl",  # Filename to save the qualified options
+):
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+    # ... start the timer
+    opts_time = Timer("qualify all options")
+    opts_time.start()
+
+    HOST, CID = ibp.HOST, ibp.CID
+
+    if RUN_ON_PAPER:
+        print(f"\nQualifying {MARKET} raw options using Paper account\n")
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
+    LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
+    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
+
+    # * SETUP LOGS AND CLEAR THEM
+    LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_qopts.log")
+    util.logToFile(path=LOGFILE, level=30)
+    with open(LOGFILE, "w"):
+        pass
+
+    # * LOAD FILES
+    df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
+
+    if REUSE:  # remove existing option symbols from chains
+        try:
+            qopts = pd.read_pickle(DATAPATH.joinpath(OP_FILENAME))
+            available_opts = {q.symbol for q in qopts}
+            df_chains = df_chains[~df_chains.symbol.isin(available_opts)]
+        except FileNotFoundError:
+            print(
+                f"\n{OP_FILENAME} for {MARKET} is not found!\n"
+                + f"All chains will be qualified!!\n"
+            )
+    else:
+        qopts = pd.Series([], dtype=object, name="contract")
+
+    if df_chains.empty:
+        print(
+            f"\nqopts.pkl has all df_chains symbols and so it is not recreated!"
+            + f"\nRun qualify_opts with REUSE = False to recreate entirely new qopts.pkl\n"
+        )
+        return qopts
+
+    df_ch = pd.concat(
+        (df_chains.assign(right="P"), df_chains.assign(right="C")), ignore_index=True
+    )
+    # ... build the options
+    opts = [
+        Option(s, e, k, r, x)
+        for s, e, k, r, x in zip(
+            df_ch.symbol,
+            df_ch.expiry,
+            df_ch.strike,
+            df_ch.right,
+            ["NSE" if MARKET.upper() == "NSE" else "SMART"] * len(df_ch),
+        )
+    ]
+
+    # ... generate new options
+    with IB().connect(HOST, PORT, CID) as ib:
+        new_qopts = ib.run(
+            executeAsync(
+                ib=ib,
+                algo=qualify,
+                cts=opts,
+                CONCURRENT=100,
+                TIMEOUT=5,
+                post_process=save_df,
+                DATAPATH=DATAPATH,
+                OP_FILENAME="z_new_qopts_temp.pkl",
+            )
+        )
+
+    # ... merge the qualified options
+    qopts = pd.concat([qopts, new_qopts], ignore_index=True).drop_duplicates()
+
+    # ... pickle and clean
+    qopts.to_pickle(DATAPATH.joinpath("qopts.pkl"))
+    try:
+        os.remove(DATAPATH.joinpath("z_new_qopts_temp.pkl"))
+    except OSError as e:
+        print(f"No temp file to remove!! Error: {e}")
+
+    opts_time.stop()
+
+    return qopts
+
+
+if __name__ == "__main__":
+
+    # * USER INTERFACE
+
+    # . first... get first user input for market
+    mkt_dict = {1: "NSE", 2: "SNP"}
+    mkt_ask_range = [i + 1 for i in list(range(len(mkt_dict)))]
+    mkt_ask = "Create base data for:\n"
+    mkt_ask = mkt_ask + "1) NSE\n"
+    mkt_ask = mkt_ask + "2) SNP\n"
+
+    while True:
+        data = input(mkt_ask)  # check for int in input
+        try:
+            mkt_int = int(data)
+        except ValueError:
+            print("\nI didn't understand what you entered. Try again!\n")
+            continue  # Loop again
+        if not mkt_int in mkt_ask_range:
+            print(f"\nWrong number! choose between {mkt_ask_range}...")
+        else:
+            MARKET = mkt_dict[mkt_int]
+            break  # success and exit loop
+
+    # . second ... ask if the routines need to run on paper
+    paper_ip = input("\nShould Engine run on `Paper`? (Y/N) ").lower()
+    if paper_ip == "y":
+        RUN_ON_PAPER = True
+    else:
+        RUN_ON_PAPER = False
+
+    # . third ... check if the existing pickles need to be deleted
+    delete_ip = input("\n\nDelete Engine pickles? (Y/N) ").lower()
+    if delete_ip == "y":
+        DELETE_PICKLES = True
+    else:
+        DELETE_PICKLES = False
+
+    # . fourth ... check if the qopts.pkl are to be deleted
+    reuse_qots_ip = input(
+        "\n\nRe-use `qopts.pkl`? (Y/N) \n...Note: regenerting qopts takes time!\n"
+    ).lower()
+    if reuse_qots_ip == "y":
+        REUSE = True
+    else:
+        REUSE = False
+
+    # * SET THE VARIABLES
+
+    ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
@@ -910,207 +1050,47 @@ if __name__ == "__main__":
     with open(LOGFILE, "w"):
         pass
 
+    # * DELETE UNNECESSARY FILES
+    if DELETE_PICKLES:
+        for f in [
+            "df_symlots.pkl",
+            "df_unds.pkl",
+            "df_ohlcs.pkl",
+            "df_chains.pkl",
+            "df_und_margins.pkl",
+            "z_new_qopts_temp.pkl",
+        ]:
+            try:
+                os.remove(DATAPATH.joinpath(f))
+            except OSError as e:
+                print(f"\nCannot remove file. {e}")
+
     # .. start the timer
-    all_time = Timer("Complete program")
+    all_time = Timer("Engine")
     all_time.start()
 
-    df_symlots = get_symlots(MARKET)
-    und_cts = list(df_symlots.contract.unique())
-    df_unds = get_unds(MARKET=MARKET, und_cts=und_cts, savedf=True)
-    # df_ohlcs = get_ohlcs(MARKET=MARKET, und_cts=und_cts, savedf=True) # !!! Temporarily disabled
-    df_chains = get_chains(MARKET=MARKET, und_cts=und_cts, savedf=True)
+    df_symlots = get_symlots(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER)
 
-    """df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
-    und_cts = list(df_symlots.contract.sample(1).unique())  # !!! DATA LIMTER
-    df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
-    # df_ohlcs = get_ohlcs(MARKET=MARKET, und_cts=und_cts, savedf=True)"""
+    und_cts = list(df_symlots.contract.unique())
+
+    df_unds = get_unds(
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
+    )
+
+    df_ohlcs = get_ohlcs(
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
+    )
+
+    df_chains = get_chains(
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
+    )
 
     df_und_margins = get_und_margins(
-        MARKET=MARKET, und_cts=und_cts, savedf=True)
-
-    # * PREPARE RAW OPTIONS AND QUALIFY THEM
-    qopt_time = Timer("qualify_opts")
-    qopt_time.start()
-
-    raw_opts = prepOpts(MARKET)
-
-    # !!! TEMPORARY DATA LIMITER
-    raw_opts = [r for r in raw_opts if r.symbol in [und_cts[0].symbol]]
-    # print(f'\nraw_opts: {raw_opts}\n')  # !!! TEMPORARY
-
-    with IB().connect(HOST, PORT, CID) as ib:
-        qopts = ib.run(
-            executeAsync(
-                ib=ib,
-                algo=qualify,
-                cts=raw_opts,
-                CONCURRENT=200,
-                TIMEOUT=5,
-                post_process=save_df,
-                DATAPATH=DATAPATH,
-                OP_FILENAME="qopts.pkl",
-            )
-        )
-    qopt_time.stop()
-
-    # * GET PRICE OF THE QUALIFIED OPTIONS
-    qopts = pd.read_pickle(DATAPATH.joinpath("qopts.pkl"))
-
-    qopt_price_time = Timer("qopt_prices")
-    qopt_price_time.start()
-
-    with IB().connect(HOST, PORT, CID) as ib:
-        df_opt_prices = ib.run(
-            executeAsync(
-                ib=ib,
-                algo=price,
-                cts=qopts,
-                CONCURRENT=100,
-                TIMEOUT=8,
-                post_process=save_df,
-                DATAPATH=DATAPATH,
-                OP_FILENAME="df_opt_prices.pkl",
-            )
-        )
-
-    qopt_price_time.stop()
-
-    # * GET MARGINS OF THE QUALIFIED OPTIONS
-    opt_mgn_time = Timer(MARKET.lower() + "opt_margins")
-    opt_mgn_time.start()
-
-    opt_cts = qopts
-
-    optcols = "conId,symbol,lastTradeDateOrContractMonth,strike,right,exchange".split(
-        ","
-    )
-    df_opts = util.df(qopts.to_list())[optcols].rename(
-        columns={"lastTradeDateOrContractMonth": "expiry"}
-    )
-    df_opts["expiryM"] = df_opts.expiry.apply(lambda d: d[:4] + "-" + d[4:6])
-    df_opts["contract"] = qopts
-
-    # ...get the lots
-    if MARKET.upper() == "NSE":
-        cols1 = ["symbol", "expiryM"]
-        df_opts = (
-            df_opts.set_index(cols1)
-            .join(df_symlots[cols1 + ["lot"]].set_index(cols1))
-            .reset_index()
-        )
-        df_opts = df_opts.drop("expiryM", 1)
-    else:
-        df_opts["lot"] = 100
-
-    df_opts = df_opts.assign(
-        order=[
-            MarketOrder("SELL", lot / lot)
-            if MARKET.upper() == "SNP"
-            else MarketOrder("SELL", lot)
-            for lot in df_opts.lot
-        ]
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
     )
 
-    opt_cos = [(c, o) for c, o in zip(df_opts.contract, df_opts.order)]
-
-    with IB().connect(HOST, PORT, CID) as ib:
-        df_opt_margins = ib.run(
-            executeAsync(
-                ib=ib,
-                algo=margin,
-                cts=opt_cos,
-                CONCURRENT=200,
-                TIMEOUT=5,
-                post_process=save_df,
-                DATAPATH=DATAPATH,
-                OP_FILENAME="df_opt_margins.pkl",
-            )
-        )
-    opt_mgn_time.stop()
-
-    # * INTEGRATE AND PICKLE FINAL OPTION df_opts
-    # !!! TEMPORARY for integration test
-    # df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
-    # df_unds = pd.read_pickle(DATAPATH.joinpath('df_unds.pkl'))
-    # df_opt_margins = pd.read_pickle(DATAPATH.joinpath('df_opt_margins.pkl'))
-    # df_opt_prices = pd.read_pickle(DATAPATH.joinpath('df_opt_prices.pkl'))
-
-    # integrate undPrice to df_opt_prices
-    with IB().connect(HOST, PORT, CID) as ib:
-        df_und_prices = ib.run(executeAsync(
-            ib, price, und_cts, save_df, CONCURRENT=40, TIMEOUT=8))
-    df_opt_prices['undPrice'] = df_opt_prices.symbol.map(
-        df_und_prices.set_index('symbol').price.to_dict())
-
-    # !!! NOT NEEDED BECAUSE OF PREVIOUS CODE TO GET df_und_prices AND INTEGRATE WITH df_opt_prices
-    """ # ... replace missing undPrice with price from df_und
-    old_price = df_opt_prices[df_opt_prices.undPrice.isnull()].symbol.map(
-        df_unds.set_index("symbol").undPrice.to_dict()
+    qopts = qualify_opts(
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, REUSE=REUSE, OP_FILENAME="qopts.pkl"
     )
-    df_opt_prices.loc[df_opt_prices.undPrice.isnull(), "undPrice"] = old_price """
-
-    # ... merge price, margins and lots
-    cols_to_use = list(df_opt_margins.columns.difference(df_opt_prices.columns)) + [
-        "conId"
-    ]
-    df = (
-        df_opt_prices.set_index("conId")
-        .join(df_opt_margins[cols_to_use].set_index("conId"))
-        .reset_index()
-    )
-
-    # ... add intrinsic and time values
-    df = df.assign(
-        intrinsic=np.where(
-            df.right == "C",
-            (df.undPrice - df.strike).clip(0, None),
-            (df.strike - df.undPrice).clip(0, None),
-        )
-    )
-    df = df.assign(timevalue=df.price - df.intrinsic,
-                   dte=df.expiry.apply(get_dte))
-
-    # ... compute std deviation
-    df.insert(14, "sdMult", calcsdmult_df(df.strike, df))
-
-    # ... get the lots
-    df["expiryM"] = df.expiry.apply(lambda d: d[:4] + "-" + d[4:6])
-    if MARKET.upper() == "NSE":
-        cols1 = ["symbol", "expiryM"]
-        df = (
-            df.set_index(cols1)
-            .join(df_symlots[cols1 + ["lot"]].set_index(cols1))
-            .reset_index()
-        )
-        df = df.drop("expiryM", 1)
-    else:
-        df["lot"] = 100
-
-    # ... compute rom
-    df["rom"] = (df.price * df.lot - df.comm).clip(0) / \
-        df.margin * 365 / df.dte
-
-    # ... get the underlying iv and std for reference
-    und_iv = df.symbol.map(
-        {
-            i: j
-            for k, v in df_unds[["symbol", "iv"]]
-            .set_index("symbol")
-            .to_dict()
-            .items()
-            for i, j in v.items()
-        }
-    )
-
-    und_sd = (
-        df[["symbol", "strike", "undPrice", "dte"]]
-        .assign(iv=und_iv)
-        .apply(lambda x: calcsd(x.strike, x.undPrice, x.dte, x.iv), axis=1)
-    )
-
-    df = df.assign(undIV=und_iv, undSD=und_sd)
-
-    # ... pickle
-    df.to_pickle(DATAPATH.joinpath("df_opts.pkl"))
 
     all_time.stop()

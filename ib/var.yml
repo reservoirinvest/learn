@@ -30,6 +30,7 @@ NSE:
   FALLRISE: False # Flag to use fall rise as band
   HILO52: False # Flag to use hilo52 as band.
   # If both FALLRISE & HILO52 are selected, best of both price will be taken.
+  
   PREC: 0.05
 
   CALLSTDMULT: 1.8 # Min stdev multiple for calls
@@ -38,7 +39,7 @@ NSE:
 
   MINROM: 0.2
   MINOPTSELLPRICE: 0.5
-  MAXOPTQTY_SYM: 2 # Maximum option contract quantity per symbol to trade 
+  MAXOPTQTY_SYM: 5 # Maximum option contract quantity per symbol to trade 
 
 SNP:
   EXCHANGE: 'SMART'
@@ -72,7 +73,7 @@ SNP:
 
   MINROM: 0.4
   MINOPTSELLPRICE: 0.5
-  MAXOPTQTY_SYM: 1 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
+  MAXOPTQTY_SYM: 5 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
 
   SPECIALS: # Managed manually (outside automation)
   - TSLA # for last hour shorts
