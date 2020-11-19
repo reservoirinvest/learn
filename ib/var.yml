@@ -35,10 +35,10 @@ NSE:
 
   CALLSTDMULT: 1.8 # Min stdev multiple for calls
   PUTSTDMULT: 1.8 # Min stdev multiple for puts
-  MINEXPROM: 1.5
+  MINEXPROM: 1
 
   MINROM: 0.2
-  MINOPTSELLPRICE: 0.5
+  MINOPTSELLPRICE: 0.05
   MAXOPTQTY_SYM: 5 # Maximum option contract quantity per symbol to trade 
 
 SNP:

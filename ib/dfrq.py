@@ -52,7 +52,8 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     df_pf = df_pf.assign(contract=pf_cts)
     df_pf = df_pf.assign(
         order=[
-            MarketOrder("SELL", abs(p)) if p > 0 else MarketOrder("BUY", abs(p))
+            MarketOrder("SELL", abs(p)) if p > 0 else MarketOrder(
+                "BUY", abs(p))
             for p in df_pf.position
         ]
     )
@@ -66,9 +67,11 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
                 ib=ib,
                 algo=margin,
                 cts=cos,
-                CONCURRENT=200,
+                CONCURRENT=50 * 4,
                 TIMEOUT=5,
                 post_process=save_df,
+                OP_FILENAME="",
+                **{'FILL_DELAY': 5},
             )
         )
 
@@ -82,7 +85,8 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     # * GET GROSS POSITIONS
     # .map lots for the options
     df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
-    lotmap = df_symlots[["symbol", "lot"]].set_index("symbol").to_dict("dict")["lot"]
+    lotmap = df_symlots[["symbol", "lot"]].set_index(
+        "symbol").to_dict("dict")["lot"]
     lot = np.where(df_pf.secType == "OPT", df_pf.symbol.map(lotmap), 1)
     df_pf.insert(7, "lot", lot)
 
@@ -95,11 +99,13 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
         )
     )
 
-    df_gp = df_pf.groupby("symbol").grosspos.apply(sum).sort_values(ascending=False)
+    df_gp = df_pf.groupby("symbol").grosspos.apply(
+        sum).sort_values(ascending=False)
 
     # .get lotmap from df_unds
     df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
-    lotmap = df_symlots[["symbol", "lot"]].set_index("symbol").to_dict("dict")["lot"]
+    lotmap = df_symlots[["symbol", "lot"]].set_index(
+        "symbol").to_dict("dict")["lot"]
     s_gross = df_unds.close * df_unds.symbol.map(lotmap)
     dfrq = (
         df_unds.assign(lot=df_unds.symbol.map(lotmap), gross=s_gross)
@@ -116,7 +122,8 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     MAX_GROSSPOS = max(s_gross) if MARKET == "NSE" else s_gross.quantile(0.8)
 
     # .compute remaining quantities from MAX_GROSSPOS
-    remq = (MAX_GROSSPOS - dfrq.grosspos.fillna(0)) / (dfrq.undPrice * dfrq.lot)
+    remq = (MAX_GROSSPOS - dfrq.grosspos.fillna(0)) / \
+        (dfrq.undPrice * dfrq.lot)
     dfrq = dfrq.assign(remq=remq)
 
     dfrq.loc[dfrq.remq < 0, "remq"] = 0  # zerorize negative remq
@@ -161,7 +168,8 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     uncovered = sorted(df_uncovered.symbol.unique())
 
     # dodo: non-fresh, non-partial stock symbols that are neither covered and not protected
-    not_dodo = set(list(partials) + list(fresh) + list(undefended) + list(uncovered))
+    not_dodo = set(list(partials) + list(fresh) +
+                   list(undefended) + list(uncovered))
     m_dodo = df_pf.symbol.isin(
         df_pf[df_pf.secType == "STK"].symbol
     ) & ~df_pf.symbol.isin(not_dodo)
@@ -231,7 +239,27 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
 
 if __name__ == "__main__":
 
-    MARKET = "SNP"
+    # * USER INTERFACE
+
+    # . first... get first user input for market
+    mkt_dict = {1: "NSE", 2: "SNP"}
+    mkt_ask_range = [i + 1 for i in list(range(len(mkt_dict)))]
+    mkt_ask = "Create fresh naked options for:\n"
+    mkt_ask = mkt_ask + "1) NSE\n"
+    mkt_ask = mkt_ask + "2) SNP\n"
+
+    while True:
+        data = input(mkt_ask)  # check for int in input
+        try:
+            mkt_int = int(data)
+        except ValueError:
+            print("\nI didn't understand what you entered. Try again!\n")
+            continue  # Loop again
+        if not mkt_int in mkt_ask_range:
+            print(f"\nWrong number! choose between {mkt_ask_range}...")
+        else:
+            MARKET = mkt_dict[mkt_int]
+            break  # success and exit loop
 
     dfrq = get_dfrq(MARKET)
 

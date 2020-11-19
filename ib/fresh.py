@@ -11,11 +11,11 @@ import pandas as pd
 from ib_insync import IB, MarketOrder, util
 
 from dfrq import get_dfrq
-from engine import executeAsync, margin, price, save_df
+from engine import executeAsync, get_unds, margin, price, save_df
 from support import Timer, Vars, calcsdmult_df, get_dte, get_prec
 
 
-def get_fresh(MARKET: str) -> pd.DataFrame:
+def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
     HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
@@ -36,11 +36,19 @@ def get_fresh(MARKET: str) -> pd.DataFrame:
 
     # * LOAD FILES
     qopts = pd.read_pickle(DATAPATH.joinpath("qopts.pkl"))
-    df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
-    df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
+    df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
+    df_chains = pd.read_pickle(DATAPATH.joinpath('df_chains.pkl'))
 
-    # * GET dfrq
+    # * GET df_unds AND dfrq
+    und_cts = df_symlots.contract.unique()
+
+    if RECALC_UNDS:
+        df_unds = get_unds(MARKET, und_cts, savedf=True)
+    else:
+        df_unds = pd.read_pickle(DATAPATH.joinpath('df_unds.pkl'))
+
     dfrq = get_dfrq(MARKET)
+
     fresh = set(dfrq[dfrq.status == "fresh"].symbol)
 
     # . generate df_opts from qopts.pkl
@@ -141,8 +149,8 @@ def get_fresh(MARKET: str) -> pd.DataFrame:
 
     # * GET PRICE, IV AND MARGIN OF OPTIONS AND INTEGRATE
 
-    opt_pm_time = Timer("Option price and margin")
-    opt_pm_time.start()
+    opt_price_time = Timer(f"{MARKET} fresh option price")
+    opt_price_time.start()
 
     fresh_contracts = df_fresh1.contract.to_list()
     fresh_orders = [
@@ -152,22 +160,33 @@ def get_fresh(MARKET: str) -> pd.DataFrame:
         for lot in df_fresh1.lot
     ]
 
-    # . get fresh option price and iv
+    # . get fresh option price and iv (with warning Best: 44*4, TIMEOUT=11, `FILL_DELAY`: 11)
     with IB().connect(HOST, PORT, CID) as ib:
         df_opt_prices = ib.run(
             executeAsync(
                 ib=ib,
                 algo=price,
                 cts=fresh_contracts,
-                CONCURRENT=100,
-                TIMEOUT=8,
+                CONCURRENT=40 * 4,
+                TIMEOUT=11,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
-                OP_FILENAME="df_opt_prices.pkl",
+                **{'FILL_DELAY': 11},
+                OP_FILENAME="",
             )
         )
 
-    # . get fresh option margins
+        # to prevent first TimeoutError()
+        ib.disconnect()
+        IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
+
+    opt_price_time.stop()
+
+    # . get fresh option margins (Best: 50*4, TIMEOUT=5, `FILL_DELAY`: 5)
+
+    opt_margin_time = Timer(f"{MARKET} fresh option margin")
+    opt_margin_time.start()
+
     opt_cos = [(c, o) for c, o in zip(fresh_contracts, fresh_orders)]
 
     with IB().connect(HOST, PORT, CID) as ib:
@@ -176,15 +195,16 @@ def get_fresh(MARKET: str) -> pd.DataFrame:
                 ib=ib,
                 algo=margin,
                 cts=opt_cos,
-                CONCURRENT=200,
+                CONCURRENT=50 * 4,
                 TIMEOUT=5,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
-                OP_FILENAME="df_opt_margins.pkl",
+                OP_FILENAME="",
+                **{'FILL_DELAY': 5},
             )
         )
 
-    opt_pm_time.stop()
+    opt_margin_time.stop()
 
     # * GET ROM AND SET EXPECTED OPTION PRICE
 
@@ -210,16 +230,33 @@ def get_fresh(MARKET: str) -> pd.DataFrame:
     # . put the order quantity
     df_fresh2["qty"] = 1 if MARKET == 'SNP' else df_fresh2.lot
 
-    # . compute rom and down-sort on it
+    # . fill empty commissions
+    if MARKET == 'NSE':
+        commission = 20.0
+    else:
+        commission = 2.0
+
+    df_fresh2['comm'].fillna(value=commission, inplace=True)
+
+    # ... add intrinsic and time values
+    df_fresh2 = df_fresh2.assign(intrinsic=np.where(df_fresh2.right == 'C',
+                                                    (df_fresh2.undPrice -
+                                                     df_fresh2.strike).clip(0, None),
+                                                    (df_fresh2.strike - df_fresh2.undPrice).clip(0, None)))
+    df_fresh2 = df_fresh2.assign(
+        timevalue=df_fresh2.price - df_fresh2.intrinsic)
+
+    # . compute rom based on timevalue, remove zero rom and down-sort on it
     df_fresh2["rom"] = (
-        (df_fresh2.price * df_fresh2.lot - df_fresh2.comm).clip(0)
+        (df_fresh2.timevalue * df_fresh2.lot - df_fresh2.comm).clip(0)
         / df_fresh2.margin
         * 365
         / df_fresh2.dte
     )
 
-    df_fresh2 = df_fresh2.sort_values(
-        "rom", ascending=False).reset_index(drop=True)
+    df_fresh2 = df_fresh2[df_fresh2.rom > 0]\
+        .sort_values("rom", ascending=False)\
+        .reset_index(drop=True)
 
     # .establish expRom
     #    ... for those whose RoM is < MINROM, make it equal to MINROM
@@ -231,6 +268,9 @@ def get_fresh(MARKET: str) -> pd.DataFrame:
         * np.maximum(ibp.MINOPTSELLPRICE, df_fresh2.price)
         / df_fresh2.rom
     ).apply(lambda x: get_prec(x, ibp.PREC))
+
+    # . remove NaN from expPrice
+    df_fresh2 = df_fresh2.dropna(subset=['expPrice']).reset_index(drop=True)
 
     # * PICKLE AND SAVE TO EXCEL
     df_fresh2.to_pickle(DATAPATH.joinpath("df_fresh.pkl"))
@@ -304,4 +344,4 @@ if __name__ == "__main__":
             MARKET = mkt_dict[mkt_int]
             break  # success and exit loop
 
-    get_fresh(MARKET)
+    get_fresh(MARKET=MARKET, RECALC_UNDS=True)

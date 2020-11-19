@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import math
 import os
+import pathlib
 import re
 import time
 from collections import defaultdict
@@ -136,6 +137,49 @@ def get_dte(dt):
         dte = None
 
     return dte
+
+
+def get_openorders(MARKET: str) -> pd.DataFrame:
+    '''Gets openorders
+
+    Arg: 
+        (MARKET) as str SNP|NSE
+
+    Returns: 
+        dataframe of openorders
+
+    '''
+
+    TMPLTPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "template")
+
+    # initialize yaml variables
+    # ... set parameters from var.yml
+    ibp = Vars(MARKET.upper())
+
+    HOST, PORT, MASTERCID = ibp.HOST, ibp.PORT, ibp.MASTERCID
+    ACTIVE_STATUS = ibp.ACTIVE_STATUS
+
+    # .. initialize openorder dataframe from template
+    df_openords = pd.read_pickle(TMPLTPATH.joinpath('df_openords.pkl'))
+
+    with IB().connect(HOST, PORT, MASTERCID) as ib:
+        ib.reqAllOpenOrders()  # To kickstart collection of open orders
+        ib.sleep(0.3)
+        trades = ib.trades()
+
+    if trades:
+        all_trades_df = util.df(t.contract for t in trades).join(util.df(
+            t.orderStatus for t in trades)).join(util.df(t.order for t in trades), lsuffix='_')
+
+        all_trades_df.rename(
+            {'lastTradeDateOrContractMonth': 'expiry'}, axis='columns', inplace=True)
+        trades_cols = ['conId', 'symbol', 'secType', 'expiry', 'strike', 'right',
+                       'orderId', 'permId', 'action', 'totalQuantity', 'lmtPrice', 'status']
+
+        dfo = all_trades_df[trades_cols]
+        df_openords = dfo[all_trades_df.status.isin(ACTIVE_STATUS)]
+
+    return df_openords
 
 
 async def get_pnl(ib, MARKET):
@@ -305,4 +349,5 @@ def quick_pf(ib) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    print(get_prec(0.6, 0.01))
+
+    print(get_openorders('SNP'))

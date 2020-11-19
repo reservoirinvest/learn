@@ -13,7 +13,7 @@ import pandas as pd
 import requests
 from ib_insync import IB, Contract, MarketOrder, Option, util
 
-from support import Timer, Vars, get_dte
+from support import Timer, Vars, calcsdmult_df, get_dte
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
@@ -161,10 +161,12 @@ async def chain(ib: IB, c) -> pd.DataFrame:
 
 
 # .Price
-async def price(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
+async def price(ib: IB, c, **kwargs) -> pd.DataFrame:
     """Price coro. Use CONCURRENT=40, TMEOUT=8 for optimal executeAsync results"""
 
-    if isinstance(c, tuple):
+    FILL_DELAY = kwargs['FILL_DELAY']
+
+    if isinstance(pre_process(c), tuple):
         c = c[0]
 
     tick = ib.reqMktData(c, genericTickList="106")
@@ -242,21 +244,36 @@ async def price(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
 
 
 # .Margin
-async def margin(ib: IB, c) -> pd.DataFrame:
+async def margin(ib: IB, c, **kwargs) -> pd.DataFrame:
 
-    ct, o = c
+    FILL_DELAY = kwargs['FILL_DELAY']
+
+    ct, o = pre_process(c)
 
     async def wifAsync(ct, o):
         wif = ib.whatIfOrderAsync(ct, o)
-        await asyncio.sleep(0)
+        await asyncio.sleep(FILL_DELAY)
         return wif
 
-    wifs = await ib.whatIfOrderAsync(ct, o)
+    # wifs = await ib.whatIfOrderAsync(ct, o) # !!! Temporarily commented out to test wifasync
+
+    wifs = await wifAsync(ct, o)
+
+    # print(f'wifs.result(): {wifs.result()}')  # !!! TEMPORARY
 
     try:
+        """ # Used only for await ib.whatIfOrderAsync(ct, o) - not wifAsync!
         df_wifs = pd.DataFrame([vars(wifs)])[
             ["initMarginChange", "maxCommission", "commission"]
-        ]
+        ] """
+
+        if wifs.done():
+            df_wifs = util.df([wifs.result()])[
+                ["initMarginChange", "maxCommission", "commission"]]
+        else:
+            df_wifs = pd.DataFrame(
+                {'initMarginChange': np.nan, 'maxCommission': np.nan, 'commission': np.nan}, index=range(1))
+
         df_wifs = df_wifs.assign(conId=ct.conId, localSymbol=ct.localSymbol)
         df_wifs = df_wifs.assign(
             comm=df_wifs[["commission", "maxCommission"]].min(axis=1),
@@ -269,7 +286,7 @@ async def margin(ib: IB, c) -> pd.DataFrame:
         )
     except TypeError as e:
         print(
-            f"\nTypeError: Something is wrong with contract: {c}, order: {0} !\n")
+            f"\nTypeError: Something is wrong with contract: {c}, order: {0} \n...in margin wif: {wifs} !\n")
         df_margin = pd.DataFrame(
             [
                 {
@@ -370,7 +387,7 @@ async def executeAsync(
         [set, pathlib.Path, str], pd.DataFrame
     ] = None,  # If checkpoint is needed
     DATAPATH: pathlib.Path = None,  # Necessary for post_process
-    CONCURRENT: int = 40,  # adjust to prevent overflows
+    CONCURRENT: int = 44,  # to prevent overflows put 44 * (TIMEOUT-1)
     TIMEOUT: None = None,  # if None, no progress messages shown
     OP_FILENAME: str = "",  # output file name
     **kwargs,  # keyword inputs for algo
@@ -834,6 +851,9 @@ def get_chains(
     else:
         df_chains["lot"] = 100
 
+    # ..remove NaNs
+    df_chains = df_chains.dropna().reset_index(drop=True)
+
     # ...write back to pickle
     df_chains.to_pickle(DATAPATH.joinpath("df_chains.pkl"))
 
@@ -880,11 +900,12 @@ def get_und_margins(
                 ib=ib,
                 algo=margin,
                 cts=und_cos,
-                CONCURRENT=100,
-                TIMEOUT=8,
+                CONCURRENT=50 * 4,
+                TIMEOUT=5,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME=OP_FILENAME,
+                **{'FILL_DELAY': 5},
             )
         )
 
@@ -990,6 +1011,163 @@ def qualify_opts(
     return qopts
 
 
+# . getting price and margin into ALL options
+def opts_pm(
+    MARKET: str,
+    RUN_ON_PAPER: bool = True,  # Use PAPER account
+    OP_FILENAME: str = "df_opts.pkl",  # Filename to save the qualified options
+):
+
+    ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
+
+    HOST, CID = ibp.HOST, ibp.CID
+
+    if RUN_ON_PAPER:
+        print(f"\nQualifying {MARKET} raw options using Paper account\n")
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
+    LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
+    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
+
+    # * SETUP LOGS AND CLEAR THEM
+    LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_qopts.log")
+    util.logToFile(path=LOGFILE, level=30)
+    with open(LOGFILE, "w"):
+        pass
+
+    # * GET PRICE, IV AND MARGIN OF OPTIONS AND INTEGRATE
+
+    opt_pm_time = Timer(f"{MARKET} option price and margin")
+    opt_pm_time.start()
+
+    qopts = pd.read_pickle(DATAPATH.joinpath('qopts.pkl'))
+    df_chains = pd.read_pickle(DATAPATH.joinpath('df_chains.pkl'))
+    df_unds = pd.read_pickle(DATAPATH.joinpath('df_unds.pkl'))
+
+    # . generate df_opt1 from qopts.pkl
+    optcols = "conId,symbol,secType,lastTradeDateOrContractMonth,strike,right".split(
+        ","
+    )
+    df_opt1 = util.df(qopts.to_list())[optcols].rename(
+        columns={"lastTradeDateOrContractMonth": "expiry"}
+    )
+
+    qo_dict = {int(q.conId): q for q in qopts}
+    df_opt1["contract"] = df_opt1.conId.map(qo_dict)
+
+    df_opt1 = df_opt1.dropna(subset=["contract"]).reset_index(
+        drop=True
+    )  # Remove NaN in contracts!
+
+    # ... integrate lots (from chains), und_iv  and undPrice
+    col1 = ['symbol', 'strike', 'expiry']
+    df_opt1 = df_opt1.set_index(col1)\
+        .join(df_chains.set_index(col1)[['lot', 'dte']])\
+        .reset_index()
+
+    df_opt1['und_iv'] = df_opt1.symbol.map(
+        df_unds.set_index('symbol').iv.to_dict())
+    df_opt1['undPrice'] = df_opt1.symbol.map(
+        df_unds.set_index('symbol').undPrice.to_dict())
+
+    opt_contracts = df_opt1.contract.to_list()
+
+    opt_orders = [
+        MarketOrder("SELL", lot / lot)
+        if MARKET.upper() == "SNP"
+        else MarketOrder("SELL", lot)
+        for lot in df_opt1.lot
+    ]
+
+    # . get option margins
+    opt_cos = [(c, o) for c, o in zip(opt_contracts, opt_orders)]
+
+    with IB().connect(HOST, PORT, CID) as ib:
+        df_opt_margins = ib.run(
+            executeAsync(
+                ib=ib,
+                algo=margin,
+                cts=opt_cos,
+                CONCURRENT=500,
+                TIMEOUT=15,
+                post_process=save_df,
+                DATAPATH=DATAPATH,
+                OP_FILENAME="df_opt_margins.pkl",
+                **{'FILL_DELAY': 5},
+            )
+        )
+    # . integrate margin
+    df_opt2 = df_opt1.set_index("conId")\
+        .join(df_opt_margins.set_index("conId")[["comm", "margin"]])
+
+    # . get option price and iv
+    with IB().connect(HOST, PORT, CID) as ib:
+        df_opt_prices = ib.run(
+            executeAsync(
+                ib=ib,
+                algo=price,
+                cts=opt_contracts,
+                CONCURRENT=500,
+                TIMEOUT=15,
+                post_process=save_df,
+                DATAPATH=DATAPATH,
+                OP_FILENAME="df_opt_prices.pkl",
+                **{'FILL_DELAY': 15},
+            )
+        )
+
+    # . integrate price and iv
+    df_opt2 = df_opt2.join(df_opt_prices.set_index("conId")
+                           [["bid", "ask", "close", "last", "iv", "price"]])\
+        .reset_index()
+
+    opt_pm_time.stop()
+
+    # * GET ROM AND SET EXPECTED OPTION PRICE
+
+    # . update null iv with und_iv
+    m_iv = df_opt2.iv.isnull()
+    df_opt2.loc[m_iv, "iv"] = df_opt2[m_iv].und_iv
+
+    # . update calculated sd mult for strike
+    df_opt2.insert(19, "sdMult", calcsdmult_df(df_opt2.strike, df_opt2))
+
+    # . put the order quantity
+    df_opt2["qty"] = 1 if MARKET == 'SNP' else df_opt2.lot
+
+    # . fill empty commissions
+    if MARKET == 'NSE':
+        commission = 20.0
+    else:
+        commission = 2.0
+
+    df_opt2['comm'].fillna(value=commission, inplace=True)
+
+    # ... add intrinsic and time values
+    df_opt2 = df_opt2.assign(intrinsic=np.where(df_opt2.right == 'C',
+                                                (df_opt2.undPrice -
+                                                 df_opt2.strike).clip(0, None),
+                                                (df_opt2.strike - df_opt2.undPrice).clip(0, None)))
+    df_opt2 = df_opt2.assign(timevalue=df_opt2.price - df_opt2.intrinsic)
+
+    # . compute rom based on timevalue and down-sort on it
+    df_opt2["rom"] = (
+        (df_opt2.timevalue * df_opt2.lot - df_opt2.comm).clip(0)
+        / df_opt2.margin
+        * 365
+        / df_opt2.dte
+    )
+
+    df_opt2 = df_opt2.sort_values(
+        "rom", ascending=False).reset_index(drop=True)
+
+    df_opt2.to_pickle(DATAPATH.joinpath(OP_FILENAME))
+
+    return df_opt2
+
+
 if __name__ == "__main__":
 
     # * USER INTERFACE
@@ -1036,6 +1214,7 @@ if __name__ == "__main__":
         REUSE = True
     else:
         REUSE = False
+        print(f'...{MARKET} qopts will be over-written!!\n')
 
     # * SET THE VARIABLES
 
@@ -1092,5 +1271,14 @@ if __name__ == "__main__":
     qopts = qualify_opts(
         MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, REUSE=REUSE, OP_FILENAME="qopts.pkl"
     )
+
+    qopts_w_pm = opts_pm(MARKET=MARKET, RUN_ON_PAPER=True)
+
+    # delete df_opt_prices.pkl and df_opt_margins.pkl. They have been integrated into df_opts.pkl
+    try:
+        os.remove(DATAPATH.joinpath('df_opt_margins.pkl'))
+        os.remove(DATAPATH.joinpath('df_opt_prices.pkl'))
+    except OSError as e:
+        print(f"\nCannot remove file. {e}")
 
     all_time.stop()
