@@ -12,7 +12,7 @@ from ib_insync import IB, MarketOrder, util
 
 from dfrq import get_dfrq
 from engine import executeAsync, get_unds, margin, price, save_df
-from support import Timer, Vars, calcsdmult_df, get_dte, get_prec
+from support import Timer, Vars, calcsdmult_df, get_dte, get_market, get_prec
 
 
 def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
@@ -37,7 +37,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     # * LOAD FILES
     qopts = pd.read_pickle(DATAPATH.joinpath("qopts.pkl"))
     df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
-    df_chains = pd.read_pickle(DATAPATH.joinpath('df_chains.pkl'))
+    df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
 
     # * GET df_unds AND dfrq
     und_cts = df_symlots.contract.unique()
@@ -45,7 +45,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     if RECALC_UNDS:
         df_unds = get_unds(MARKET, und_cts, savedf=True)
     else:
-        df_unds = pd.read_pickle(DATAPATH.joinpath('df_unds.pkl'))
+        df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
 
     dfrq = get_dfrq(MARKET)
 
@@ -71,13 +71,11 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     # . build df_fresh
     df_fresh = df_opts[df_opts.symbol.isin(fresh)]
 
-    df_fresh = df_fresh[~df_fresh.symbol.isin(
-        ibp.BLACKLIST)]  # remove blacklist
+    df_fresh = df_fresh[~df_fresh.symbol.isin(ibp.BLACKLIST)]  # remove blacklist
 
     # . remove dtes
     df_fresh.insert(3, "dte", df_fresh.expiry.apply(get_dte))
-    df_fresh = df_fresh[df_fresh.dte.between(
-        ibp.MINDTE, ibp.MAXDTE, inclusive=True)]
+    df_fresh = df_fresh[df_fresh.dte.between(ibp.MINDTE, ibp.MAXDTE, inclusive=True)]
 
     # .remove options within stdev fence
 
@@ -90,8 +88,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
 
     # . compute One stdev
     df_fresh = df_fresh.assign(
-        sd1=df_fresh.undPrice * df_fresh.iv *
-        (df_fresh.dte / 365).apply(math.sqrt)
+        sd1=df_fresh.undPrice * df_fresh.iv * (df_fresh.dte / 365).apply(math.sqrt)
     )
 
     hi_sd = df_fresh.undPrice + df_fresh.sd1 * ibp.CALLSTDMULT
@@ -116,14 +113,12 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     # ... sort and pick top options around the fence [ref: https://stackoverflow.com/questions/64864630]
     # . reverse strike for Calls to get the right sort order for top values
     df = df_fresh.assign(
-        value=np.where(df_fresh.right == "C", -1 *
-                       df_fresh.strike, df_fresh.strike)
+        value=np.where(df_fresh.right == "C", -1 * df_fresh.strike, df_fresh.strike)
     )
 
     # . build cumcount series with index aligned to df
     s = (
-        (df.sort_values(["symbol", "dte", "value"]).groupby(
-            ["symbol", "dte", "right"]))
+        (df.sort_values(["symbol", "dte", "value"]).groupby(["symbol", "dte", "right"]))
         .cumcount()
         .reindex(df.index)
     )
@@ -153,6 +148,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     opt_price_time.start()
 
     fresh_contracts = df_fresh1.contract.to_list()
+
     fresh_orders = [
         MarketOrder("SELL", lot / lot)
         if MARKET.upper() == "SNP"
@@ -167,11 +163,11 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
                 ib=ib,
                 algo=price,
                 cts=fresh_contracts,
-                CONCURRENT=40 * 4,
-                TIMEOUT=11,
+                CONCURRENT=40,
+                TIMEOUT=8,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
-                **{'FILL_DELAY': 11},
+                **{"FILL_DELAY": 5.5},
                 OP_FILENAME="",
             )
         )
@@ -195,12 +191,12 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
                 ib=ib,
                 algo=margin,
                 cts=opt_cos,
-                CONCURRENT=50 * 4,
-                TIMEOUT=5,
+                CONCURRENT=200,
+                TIMEOUT=5.5,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME="",
-                **{'FILL_DELAY': 5},
+                **{"FILL_DELAY": 5.5},
             )
         )
 
@@ -228,23 +224,25 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     df_fresh2.insert(19, "sdMult", calcsdmult_df(df_fresh2.strike, df_fresh2))
 
     # . put the order quantity
-    df_fresh2["qty"] = 1 if MARKET == 'SNP' else df_fresh2.lot
+    df_fresh2["qty"] = 1 if MARKET == "SNP" else df_fresh2.lot
 
     # . fill empty commissions
-    if MARKET == 'NSE':
+    if MARKET == "NSE":
         commission = 20.0
     else:
         commission = 2.0
 
-    df_fresh2['comm'].fillna(value=commission, inplace=True)
+    df_fresh2["comm"].fillna(value=commission, inplace=True)
 
     # ... add intrinsic and time values
-    df_fresh2 = df_fresh2.assign(intrinsic=np.where(df_fresh2.right == 'C',
-                                                    (df_fresh2.undPrice -
-                                                     df_fresh2.strike).clip(0, None),
-                                                    (df_fresh2.strike - df_fresh2.undPrice).clip(0, None)))
     df_fresh2 = df_fresh2.assign(
-        timevalue=df_fresh2.price - df_fresh2.intrinsic)
+        intrinsic=np.where(
+            df_fresh2.right == "C",
+            (df_fresh2.undPrice - df_fresh2.strike).clip(0, None),
+            (df_fresh2.strike - df_fresh2.undPrice).clip(0, None),
+        )
+    )
+    df_fresh2 = df_fresh2.assign(timevalue=df_fresh2.price - df_fresh2.intrinsic)
 
     # . compute rom based on timevalue, remove zero rom and down-sort on it
     df_fresh2["rom"] = (
@@ -254,9 +252,11 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
         / df_fresh2.dte
     )
 
-    df_fresh2 = df_fresh2[df_fresh2.rom > 0]\
-        .sort_values("rom", ascending=False)\
+    df_fresh2 = (
+        df_fresh2[df_fresh2.rom > 0]
+        .sort_values("rom", ascending=False)
         .reset_index(drop=True)
+    )
 
     # .establish expRom
     #    ... for those whose RoM is < MINROM, make it equal to MINROM
@@ -270,7 +270,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     ).apply(lambda x: get_prec(x, ibp.PREC))
 
     # . remove NaN from expPrice
-    df_fresh2 = df_fresh2.dropna(subset=['expPrice']).reset_index(drop=True)
+    df_fresh2 = df_fresh2.dropna(subset=["expPrice"]).reset_index(drop=True)
 
     # * PICKLE AND SAVE TO EXCEL
     df_fresh2.to_pickle(DATAPATH.joinpath("df_fresh.pkl"))
@@ -279,8 +279,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     df_puts = df_fresh2[df_fresh2.right == "P"].reset_index(drop=True)
 
     # ... initiate Excel writer object
-    writer = pd.ExcelWriter(DATAPATH.joinpath(
-        "df_fresh.xlsx"), engine="xlsxwriter")
+    writer = pd.ExcelWriter(DATAPATH.joinpath("df_fresh.xlsx"), engine="xlsxwriter")
 
     df_fresh2.to_excel(
         writer, sheet_name="All", float_format="%.2f", index=False, freeze_panes=(1, 1)
@@ -322,26 +321,6 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
 
 if __name__ == "__main__":
 
-    # * USER INTERFACE
-
-    # . first... get first user input for market
-    mkt_dict = {1: "NSE", 2: "SNP"}
-    mkt_ask_range = [i + 1 for i in list(range(len(mkt_dict)))]
-    mkt_ask = "Create fresh naked options for:\n"
-    mkt_ask = mkt_ask + "1) NSE\n"
-    mkt_ask = mkt_ask + "2) SNP\n"
-
-    while True:
-        data = input(mkt_ask)  # check for int in input
-        try:
-            mkt_int = int(data)
-        except ValueError:
-            print("\nI didn't understand what you entered. Try again!\n")
-            continue  # Loop again
-        if not mkt_int in mkt_ask_range:
-            print(f"\nWrong number! choose between {mkt_ask_range}...")
-        else:
-            MARKET = mkt_dict[mkt_int]
-            break  # success and exit loop
+    MARKET = get_market("Create fresh options for:")
 
     get_fresh(MARKET=MARKET, RECALC_UNDS=True)

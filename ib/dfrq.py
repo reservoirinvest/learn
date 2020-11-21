@@ -9,13 +9,14 @@ import pandas as pd
 from ib_insync import IB, Contract, MarketOrder, util
 
 from engine import Timer, Vars, executeAsync, margin, qualify, save_df
-from support import quick_pf
+from support import get_market, quick_pf
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 VAR_YML = os.path.join(THIS_FOLDER, "var.yml")
 
 
 def get_dfrq(MARKET: str) -> pd.DataFrame:
+
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
     HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
@@ -52,8 +53,7 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     df_pf = df_pf.assign(contract=pf_cts)
     df_pf = df_pf.assign(
         order=[
-            MarketOrder("SELL", abs(p)) if p > 0 else MarketOrder(
-                "BUY", abs(p))
+            MarketOrder("SELL", abs(p)) if p > 0 else MarketOrder("BUY", abs(p))
             for p in df_pf.position
         ]
     )
@@ -67,11 +67,11 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
                 ib=ib,
                 algo=margin,
                 cts=cos,
-                CONCURRENT=50 * 4,
+                CONCURRENT=200,
                 TIMEOUT=5,
                 post_process=save_df,
                 OP_FILENAME="",
-                **{'FILL_DELAY': 5},
+                **{"FILL_DELAY": 5},
             )
         )
 
@@ -85,8 +85,7 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     # * GET GROSS POSITIONS
     # .map lots for the options
     df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
-    lotmap = df_symlots[["symbol", "lot"]].set_index(
-        "symbol").to_dict("dict")["lot"]
+    lotmap = df_symlots[["symbol", "lot"]].set_index("symbol").to_dict("dict")["lot"]
     lot = np.where(df_pf.secType == "OPT", df_pf.symbol.map(lotmap), 1)
     df_pf.insert(7, "lot", lot)
 
@@ -99,13 +98,11 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
         )
     )
 
-    df_gp = df_pf.groupby("symbol").grosspos.apply(
-        sum).sort_values(ascending=False)
+    df_gp = df_pf.groupby("symbol").grosspos.apply(sum).sort_values(ascending=False)
 
     # .get lotmap from df_unds
     df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
-    lotmap = df_symlots[["symbol", "lot"]].set_index(
-        "symbol").to_dict("dict")["lot"]
+    lotmap = df_symlots[["symbol", "lot"]].set_index("symbol").to_dict("dict")["lot"]
     s_gross = df_unds.close * df_unds.symbol.map(lotmap)
     dfrq = (
         df_unds.assign(lot=df_unds.symbol.map(lotmap), gross=s_gross)
@@ -122,8 +119,7 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     MAX_GROSSPOS = max(s_gross) if MARKET == "NSE" else s_gross.quantile(0.8)
 
     # .compute remaining quantities from MAX_GROSSPOS
-    remq = (MAX_GROSSPOS - dfrq.grosspos.fillna(0)) / \
-        (dfrq.undPrice * dfrq.lot)
+    remq = (MAX_GROSSPOS - dfrq.grosspos.fillna(0)) / (dfrq.undPrice * dfrq.lot)
     dfrq = dfrq.assign(remq=remq)
 
     dfrq.loc[dfrq.remq < 0, "remq"] = 0  # zerorize negative remq
@@ -135,8 +131,12 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     # * DERIVE STATUSES FROM PORTFOLIO
     # * partials, fresh, undefended, uncovered, dodo (risky & uncovered), orphan, harvest and balanced
 
+    # ... get the stocks and options
+    df_stk = df_pf[df_pf.secType.isin(["STK", "IND"])].reset_index(drop=True)
+    df_opt = df_pf[df_pf.secType == "OPT"].reset_index(drop=True)
+
     # Partials: symbols whose long/short stock positions don't cover the lots
-    m_partial = (df_pf.secType == "STK") & (
+    m_partial = (df_pf.secType.isin(["STK", "IND"])) & (
         df_pf.position % df_pf.symbol.map(lotmap) != 0
     )
     df_partial = df_pf[m_partial]
@@ -147,89 +147,74 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     df_fresh = dfrq[m_fresh]
     fresh = sorted(df_fresh.symbol.unique())
 
-    # Undefended, but covered: stock symbols in pf with short option positions
-    m_undefended = (
-        df_pf.symbol.isin(df_pf[df_pf.secType == "STK"].symbol)
-        & (~df_pf.symbol.isin(partials))
-        & (df_pf.secType == "OPT")
-        & (df_pf.position < 0)
-    )
-    df_undefended = df_pf[m_undefended]
-    undefended = sorted(df_undefended.symbol.unique())
-
-    # Uncovered, but defended: stock symbols in pf with protective long option positions
-    m_uncovered = (
-        df_pf.symbol.isin(df_pf[df_pf.secType == "STK"].symbol)
-        & (~df_pf.symbol.isin(partials))
-        & (df_pf.secType == "OPT")
-        & (df_pf.position > 0)
-    )
-    df_uncovered = df_pf[m_uncovered]
-    uncovered = sorted(df_uncovered.symbol.unique())
-
-    # dodo: non-fresh, non-partial stock symbols that are neither covered and not protected
-    not_dodo = set(list(partials) + list(fresh) +
-                   list(undefended) + list(uncovered))
-    m_dodo = df_pf.symbol.isin(
-        df_pf[df_pf.secType == "STK"].symbol
-    ) & ~df_pf.symbol.isin(not_dodo)
-    df_dodo = df_pf[m_dodo]
-    dodo = sorted(df_dodo.symbol.unique())
-
-    # orphan: short calls and short longs not in `Fresh` and whithout underlying stocks
+    # Orphan: long calls and long puts not in `Fresh` and whithout underlying stocks
     m_orphan = (
-        ~df_pf.symbol.isin(df_pf[df_pf.secType == "STK"].symbol)
-        & (~df_pf.symbol.isin(partials))
-        & (df_pf.secType == "OPT")
-    )
-    df_orphan = df_pf[m_orphan]
-
-    # Keep only those longs without any ``compensating`` shorts.
-    # ... this is done by grouping by symbols and adding the positions
-    # ... sumpos > 0 are orphan which can be set up with a short near its strike.
-    df_orphan = df_orphan.assign(
-        sumpos=df_orphan.groupby("symbol").position.transform(sum)
+        (df_opt.position > 0)
+        & ~df_opt.symbol.isin(fresh)
+        & ~df_opt.symbol.isin(df_stk.symbol.unique())
     )
 
-    df_orphan = df_orphan[df_orphan.sumpos > 0]
+    df_orphan = df_opt[m_orphan]
 
     orphan = sorted(df_orphan.symbol.unique())
 
-    # harvest: the remaining symbols are the ones to be harvested
-    # Note that this is reversed! First list and then the df!!
-    harvest = set(df_symlots.symbol.to_list()) - set(
-        partials + fresh + undefended + uncovered + dodo + orphan
+    # Uncovered: stock symbols in pf without short covered call / put positions
+    m_covered = (
+        (df_opt.position < 0)
+        & df_opt.symbol.isin(df_stk.symbol)
+        & ~df_opt.symbol.isin(partials)
     )
-    df_harvest = df_pf[df_pf.symbol.isin(harvest)].sort_values("unPnL")
+    already_covered = df_opt[m_covered].symbol.to_list()
 
-    # Build dictionary of statuses
+    df_uncovered = df_stk[~df_stk.symbol.isin(already_covered)]
+    uncovered = sorted(df_uncovered.symbol.unique())
 
-    y = defaultdict(list)
-    status = {
-        "partials": partials,
+    # Undefended: stock symbols in pf without long protective call / put options
+    m_defended = (
+        (df_opt.position > 0)
+        & df_opt.symbol.isin(df_stk.symbol)
+        & ~df_opt.symbol.isin(partials)
+    )
+    already_defended = df_opt[m_defended].symbol.to_list()
+
+    df_undefended = df_stk[~df_stk.symbol.isin(already_defended)]
+    undefended = sorted(df_undefended.symbol.unique())
+
+    # dodo: stock symbols that are neither covered and not protected
+    dodo = [s for s in uncovered if s in undefended]
+
+    # balanced: stock symbols that are both covered and protected
+    balanced = [s for s in already_covered if s in already_defended]
+
+    # remove dodos and balanced from uncovered and undefended
+    uncovered = [s for s in uncovered if s not in set(dodo + balanced)]
+    undefended = [s for s in undefended if s not in set(dodo + balanced)]
+
+    # harvest: symbols not in all other statuses
+    harvest = set(dfrq.symbol) - set(
+        orphan + uncovered + undefended + dodo + partials + fresh + balanced
+    )
+
+    # map the status to dfrq symbols
+
+    status_dict = {
         "fresh": fresh,
-        "undefended": undefended,
-        "uncovered": uncovered,
-        "dodo": dodo,
         "orphan": orphan,
+        "uncovered": uncovered,
+        "undefended": undefended,
+        "dodo": dodo,
+        "balanced": balanced,
+        "partials": partials,
         "harvest": harvest,
     }
-    for s in df_symlots.symbol.unique():
-        for k, v in status.items():
-            if s in v:
-                y[s].append(k)
 
-    # ..introduce `balanced` for symbols which are both covered and defended
-    z = defaultdict()
-    for k, v in y.items():
-        # Note: uncovered is defended, and undefended is covered.
-        # ... so checking against a set of both to get both covered and defended!!
-        if set(v) == set(["undefended", "uncovered"]):
-            z[k] = "balanced"
-        else:
-            z[k] = v[0]
+    status = dict()
+    for k, v in status_dict.items():
+        for i in v:
+            status[i] = k
 
-    dfrq = dfrq.assign(status=dfrq.symbol.map(pd.Series(z)))
+    dfrq["status"] = dfrq.symbol.map(status)
+
     dfrq.to_pickle(DATAPATH.joinpath("dfrq.pkl"))
 
     dfrq_time.stop()
@@ -239,27 +224,7 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
 
 if __name__ == "__main__":
 
-    # * USER INTERFACE
-
-    # . first... get first user input for market
-    mkt_dict = {1: "NSE", 2: "SNP"}
-    mkt_ask_range = [i + 1 for i in list(range(len(mkt_dict)))]
-    mkt_ask = "Create fresh naked options for:\n"
-    mkt_ask = mkt_ask + "1) NSE\n"
-    mkt_ask = mkt_ask + "2) SNP\n"
-
-    while True:
-        data = input(mkt_ask)  # check for int in input
-        try:
-            mkt_int = int(data)
-        except ValueError:
-            print("\nI didn't understand what you entered. Try again!\n")
-            continue  # Loop again
-        if not mkt_int in mkt_ask_range:
-            print(f"\nWrong number! choose between {mkt_ask_range}...")
-        else:
-            MARKET = mkt_dict[mkt_int]
-            break  # success and exit loop
+    MARKET = get_market("Make dfrqs for:")
 
     dfrq = get_dfrq(MARKET)
 

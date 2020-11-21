@@ -122,6 +122,31 @@ def calcsd(price, undPrice, dte, iv):
     return sdev
 
 
+def get_market(msg: str = "") -> str:
+
+    # . get user input for market
+    mkt_dict = {1: "NSE", 2: "SNP"}
+    mkt_ask_range = [i + 1 for i in list(range(len(mkt_dict)))]
+    mkt_ask = f"\n{msg}\n"
+    mkt_ask = mkt_ask + "1) NSE\n"
+    mkt_ask = mkt_ask + "2) SNP\n"
+
+    while True:
+        data = input(mkt_ask)  # check for int in input
+        try:
+            mkt_int = int(data)
+        except ValueError:
+            print("\nI didn't understand what you entered. Try again!\n")
+            continue  # Loop again
+        if not mkt_int in mkt_ask_range:
+            print(f"\nWrong number! choose between {mkt_ask_range}...")
+        else:
+            MARKET = mkt_dict[mkt_int]
+            break  # success and exit loop
+
+    return MARKET
+
+
 def get_dte(dt):
     """Gets days to expiry
 
@@ -131,8 +156,7 @@ def get_dte(dt):
         days to expiry as int"""
 
     try:
-        dte = (util.parseIBDatetime(dt) -
-               datetime.datetime.utcnow().date()).days
+        dte = (util.parseIBDatetime(dt) - datetime.datetime.utcnow().date()).days
     except Exception:
         dte = None
 
@@ -140,7 +164,7 @@ def get_dte(dt):
 
 
 def get_openorders(MARKET: str) -> pd.DataFrame:
-    '''Gets openorders
+    """Gets openorders
 
     Arg: 
         (MARKET) as str SNP|NSE
@@ -148,7 +172,7 @@ def get_openorders(MARKET: str) -> pd.DataFrame:
     Returns: 
         dataframe of openorders
 
-    '''
+    """
 
     TMPLTPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "template")
 
@@ -160,7 +184,7 @@ def get_openorders(MARKET: str) -> pd.DataFrame:
     ACTIVE_STATUS = ibp.ACTIVE_STATUS
 
     # .. initialize openorder dataframe from template
-    df_openords = pd.read_pickle(TMPLTPATH.joinpath('df_openords.pkl'))
+    df_openords = pd.read_pickle(TMPLTPATH.joinpath("df_openords.pkl"))
 
     with IB().connect(HOST, PORT, MASTERCID) as ib:
         ib.reqAllOpenOrders()  # To kickstart collection of open orders
@@ -168,13 +192,29 @@ def get_openorders(MARKET: str) -> pd.DataFrame:
         trades = ib.trades()
 
     if trades:
-        all_trades_df = util.df(t.contract for t in trades).join(util.df(
-            t.orderStatus for t in trades)).join(util.df(t.order for t in trades), lsuffix='_')
+        all_trades_df = (
+            util.df(t.contract for t in trades)
+            .join(util.df(t.orderStatus for t in trades))
+            .join(util.df(t.order for t in trades), lsuffix="_")
+        )
 
         all_trades_df.rename(
-            {'lastTradeDateOrContractMonth': 'expiry'}, axis='columns', inplace=True)
-        trades_cols = ['conId', 'symbol', 'secType', 'expiry', 'strike', 'right',
-                       'orderId', 'permId', 'action', 'totalQuantity', 'lmtPrice', 'status']
+            {"lastTradeDateOrContractMonth": "expiry"}, axis="columns", inplace=True
+        )
+        trades_cols = [
+            "conId",
+            "symbol",
+            "secType",
+            "expiry",
+            "strike",
+            "right",
+            "orderId",
+            "permId",
+            "action",
+            "totalQuantity",
+            "lmtPrice",
+            "status",
+        ]
 
         dfo = all_trades_df[trades_cols]
         df_openords = dfo[all_trades_df.status.isin(ACTIVE_STATUS)]
@@ -247,8 +287,7 @@ def get_prec(v, base):
         the precise value"""
 
     try:
-        output = round(round((v) / base) * base, -
-                       int(math.floor(math.log10(base))))
+        output = round(round((v) / base) * base, -int(math.floor(math.log10(base))))
     except Exception:
         output = None
 
@@ -314,8 +353,7 @@ async def isMarketOpen(ib: IB, MARKET: str) -> bool:
 
     tframe = tframe.assign(open=open, close=close)
     tframe = tframe.assign(
-        isopen=(tframe["now"] >= tframe["open"]) & (
-            tframe["now"] <= tframe["close"])
+        isopen=(tframe["now"] >= tframe["open"]) & (tframe["now"] <= tframe["close"])
     )
 
     market_open = any(tframe["isopen"])
@@ -348,6 +386,32 @@ def quick_pf(ib) -> pd.DataFrame:
     return df_pf
 
 
+def watchlist(MARKET: str, symbols: list, FILE_NAME="watchlist.csv") -> pd.DataFrame:
+
+    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
+
+    df_syms = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
+    df_syms = df_syms[df_syms.symbol.isin(symbols)]
+    df_syms["primaryExchange"] = [
+        "SMART" + "/" + "AMEX" if c.exchange == "SMART" else c.exchange
+        for c in df_syms.contract
+    ]
+    df_syms = df_syms[["symbol", "secType", "primaryExchange"]]
+
+    # Write to file
+    try:
+        os.remove(DATAPATH.joinpath(FILE_NAME))
+    except OSError:
+        pass
+    finally:
+        with open(DATAPATH.joinpath(FILE_NAME), "w") as f:
+            f.write("COLUMN,0\n")
+            for s in df_syms.itertuples():
+                f.write(f"DES,{s[1]},{s[2]},{s[3]}\n")
+    return df_syms
+
+
 if __name__ == "__main__":
 
-    print(get_openorders('SNP'))
+    print(get_openorders("SNP"))
+

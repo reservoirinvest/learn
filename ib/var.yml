@@ -69,7 +69,7 @@ SNP:
 
   CALLSTDMULT: 2.1 # Min stdev multiple for calls
   PUTSTDMULT: 2.8 #  Min stdev multiple for puts
-  MINEXPROM: 3.5
+  MINEXPROM: 2.5
 
   MINROM: 0.4
   MINOPTSELLPRICE: 0.5
