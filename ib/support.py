@@ -14,6 +14,7 @@ import pandas as pd
 import yaml
 from ib_insync import IB, Stock, util
 from pytz import timezone
+from scipy.integrate import quad
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 VAR_YML = os.path.join(THIS_FOLDER, "var.yml")
@@ -156,7 +157,8 @@ def get_dte(dt):
         days to expiry as int"""
 
     try:
-        dte = (util.parseIBDatetime(dt) - datetime.datetime.utcnow().date()).days
+        dte = (util.parseIBDatetime(dt) -
+               datetime.datetime.utcnow().date()).days
     except Exception:
         dte = None
 
@@ -287,11 +289,25 @@ def get_prec(v, base):
         the precise value"""
 
     try:
-        output = round(round((v) / base) * base, -int(math.floor(math.log10(base))))
+        output = round(round((v) / base) * base, -
+                       int(math.floor(math.log10(base))))
     except Exception:
         output = None
 
     return output
+
+
+def get_prob(sd):
+    '''Compute probability of a normal standard deviation
+
+    Arg:
+        (sd) as standard deviation
+    Returns:
+        probability as a float
+
+    '''
+    prob = quad(lambda x: np.exp(-x**2 / 2) / np.sqrt(2 * np.pi), -sd, sd)[0]
+    return prob
 
 
 async def isMarketOpen(ib: IB, MARKET: str) -> bool:
@@ -353,7 +369,8 @@ async def isMarketOpen(ib: IB, MARKET: str) -> bool:
 
     tframe = tframe.assign(open=open, close=close)
     tframe = tframe.assign(
-        isopen=(tframe["now"] >= tframe["open"]) & (tframe["now"] <= tframe["close"])
+        isopen=(tframe["now"] >= tframe["open"]) & (
+            tframe["now"] <= tframe["close"])
     )
 
     market_open = any(tframe["isopen"])
@@ -414,4 +431,3 @@ def watchlist(MARKET: str, symbols: list, FILE_NAME="watchlist.csv") -> pd.DataF
 if __name__ == "__main__":
 
     print(get_openorders("SNP"))
-

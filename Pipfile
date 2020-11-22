@@ -17,6 +17,7 @@ ipykernel = "*"
 nest-asyncio = "*"
 lxml = "*"
 ta = "*"
+tqdm = "*"
 
 [requires]
 python_version = "*"

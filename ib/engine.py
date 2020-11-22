@@ -17,6 +17,7 @@ from tqdm import tqdm
 from support import Timer, Vars, calcsdmult_df, get_dte, get_market, quick_pf
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
+BAR_FORMAT = "{desc:<10}{percentage:3.0f}%|{bar:30}{r_bar}"
 
 # ** SINGLE FUNCTIONS
 # * Independent functions - ready to be called.
@@ -39,66 +40,6 @@ async def qualify(ib: IB, c: Union[pd.Series, list, tuple, Contract]) -> pd.Seri
         result = None
 
     return pd.Series(result, name="contract", dtype=object)
-
-
-# . synchronously qualify
-def qopts_sync(
-    MARKET: str,
-    BLK_SIZE: int = 1000,
-    RUN_ON_PAPER: bool = True,
-    OP_FILENAME: str = "qopts.pkl",
-) -> set:
-
-    ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
-
-    HOST, CID = ibp.HOST, ibp.CID
-
-    if RUN_ON_PAPER:
-        print(f"\nQualifying {MARKET} options using Paper account\n")
-        PORT = ibp.PAPER
-    else:
-        PORT = ibp.PORT
-
-    LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
-    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
-
-    # * SETUP LOGS AND CLEAR THEM
-    LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_qualsync.log")
-    util.logToFile(path=LOGFILE, level=30)
-    with open(LOGFILE, "w"):
-        pass
-
-    # * LOAD THE FILES
-    df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
-    df_ch = pd.concat(
-        (df_chains.assign(right="P"), df_chains.assign(right="C")), ignore_index=True
-    )
-
-    # ... build the options
-    cts = [
-        Option(s, e, k, r, x)
-        for s, e, k, r, x in zip(
-            df_ch.symbol,
-            df_ch.expiry,
-            df_ch.strike,
-            df_ch.right,
-            ["NSE" if MARKET.upper() == "NSE" else "SMART"] * len(df_ch),
-        )
-    ]
-
-    raw_blks = [cts[i : i + BLK_SIZE] for i in range(0, len(cts), BLK_SIZE)]
-
-    qopts = set()
-
-    with IB().connect(HOST, PORT, CID) as ib:
-        for b in tqdm(raw_blks, desc="raw blocks"):
-            qs = ib.qualifyContracts(*b)
-            qopts.update(set(qs))
-
-    s = pd.Series(list(qopts))
-    s.to_pickle(DATAPATH.join("qopts.pkl"))
-
-    return s
 
 
 # .OHLC
@@ -135,7 +76,8 @@ async def und(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
     await asyncio.sleep(FILL_DELAY)
 
     try:
-        undPrice = next(x for x in (tick.last, tick.close) if not math.isnan(x))
+        undPrice = next(x for x in (tick.last, tick.close)
+                        if not math.isnan(x))
     except Exception as e:
         print(f"undPrice not found in {tick.contract.symbol}. Error: {e}")
         undPrice = None
@@ -208,7 +150,8 @@ async def chain(ib: IB, c) -> pd.DataFrame:
 
     # convert symbols - friendly to IBKR
     df2 = df2.assign(symbol=df2.symbol.str.slice(0, 9))
-    ntoi = {"M%26M": "MM", "M%26MFIN": "MMFIN", "L%26TFH": "LTFH", "NIFTY": "NIFTY50"}
+    ntoi = {"M%26M": "MM", "M%26MFIN": "MMFIN",
+            "L%26TFH": "LTFH", "NIFTY": "NIFTY50"}
     df2.symbol = df2.symbol.replace(ntoi)
 
     # Get the dte
@@ -287,7 +230,8 @@ async def price(ib: IB, co, **kwargs) -> pd.DataFrame:
 
     except AttributeError as e:
 
-        print(f"\nError in {c.localSymbol}: {e}. df will have no price and iv!\n")
+        print(
+            f"\nError in {c.localSymbol}: {e}. df will have no price and iv!\n")
 
         df = df.assign(
             time=np.nan,
@@ -315,14 +259,15 @@ async def margin(ib: IB, co, **kwargs) -> pd.DataFrame:
         FILL_DELAY = 1.5
 
     empty_df = pd.DataFrame(
-        {"initMarginChange": np.nan, "maxCommission": np.nan, "commission": np.nan,},
+        {"initMarginChange": np.nan, "maxCommission": np.nan, "commission": np.nan, },
         index=range(1),
     )
 
     try:
         ct, o = pre_process(co)
     except ValueError as ve:
-        print(f"\nError: {co} co supplied is incorrect! It should be a tuple(ct, o)\n")
+        print(
+            f"\nError: {co} co supplied is incorrect! It should be a tuple(ct, o)\n")
         df = empty_df
 
     async def wifAsync(ct, o):
@@ -338,7 +283,8 @@ async def margin(ib: IB, co, **kwargs) -> pd.DataFrame:
 
         try:
 
-            df = util.df([res])[["initMarginChange", "maxCommission", "commission"]]
+            df = util.df([res])[["initMarginChange",
+                                 "maxCommission", "commission"]]
 
         except TypeError as e:
 
@@ -477,6 +423,7 @@ async def executeAsync(
     DATAPATH: pathlib.Path = None,  # Necessary for post_process
     CONCURRENT: int = 44,  # to prevent overflows put 44 * (TIMEOUT-1)
     TIMEOUT: None = None,  # if None, no progress messages shown
+    SHOW_TQDM: bool = True,  # Show tqdm bar instead of individual messages
     OP_FILENAME: str = "",  # output file name
     **kwargs,  # keyword inputs for algo
 ):
@@ -485,6 +432,12 @@ async def executeAsync(
     results = set()
     remaining = pre_process(cts)
     last_len_tasks = 0  # tracking last length for error catch
+
+    # Set pbar
+    if SHOW_TQDM:
+        pbar = tqdm(
+            total=len(remaining), desc=f"{algo.__name__}: ", bar_format=BAR_FORMAT,
+        )
 
     # Get the results
     while len(remaining):
@@ -513,7 +466,8 @@ async def executeAsync(
 
             # Remove dones from remaining
             done_names = [d.get_name() for d in done]
-            remaining = [c for c in remaining if make_name(c) not in done_names]
+            remaining = [c for c in remaining if make_name(
+                c) not in done_names]
 
             # Update results and checkpoint
             results.update(done)
@@ -525,10 +479,16 @@ async def executeAsync(
                 output = results
 
             if TIMEOUT:
+
                 if remaining:
-                    print(
-                        f"\nDone {algo.__name__} for {done_names[:2]} {len(results)} out of {len(cts)}. Pending {[make_name(c) for c in remaining][:2]}"
-                    )
+
+                    if SHOW_TQDM:
+                        pbar.update(len(done))
+                        pbar.refresh()
+                    else:
+                        print(
+                            f"\nDone {algo.__name__} for {done_names[:2]} {len(results)} out of {len(cts)}. Pending {[make_name(c) for c in remaining][:2]}"
+                        )
 
                 # something wrong. Task is not progressing
                 if (len(tasks) == last_len_tasks) & (len(tasks) > 0):
@@ -544,10 +504,16 @@ async def executeAsync(
 
                     pend_names = [p.get_name() for p in pend]
                     # remove pending from remaining
-                    remaining = [c for c in remaining if make_name(c) not in pend_names]
+                    remaining = [c for c in remaining if make_name(
+                        c) not in pend_names]
 
                 # re-initialize last length of tasks
                 last_len_tasks = len(tasks)
+
+            if SHOW_TQDM:
+                pbar.update(len(remaining))
+                pbar.refresh()
+        pbar.close()
 
     return output
 
@@ -591,7 +557,8 @@ def get_nse() -> pd.DataFrame:
     df_symlots.columns = df_symlots.columns.str.strip().str.lower()
 
     # strip all string contents of whitespaces
-    df_symlots = df_symlots.applymap(lambda x: x.strip() if type(x) is str else x)
+    df_symlots = df_symlots.applymap(
+        lambda x: x.strip() if type(x) is str else x)
 
     # remove 'Symbol' row
     df_symlots = df_symlots[df_symlots.symbol != "Symbol"]
@@ -612,25 +579,30 @@ def get_nse() -> pd.DataFrame:
     )
 
     # convert lots to integers
-    df_symlots = df_symlots.assign(lot=pd.to_numeric(df_symlots.lot, errors="coerce"))
+    df_symlots = df_symlots.assign(
+        lot=pd.to_numeric(df_symlots.lot, errors="coerce"))
 
     # convert & to %26
-    df_symlots = df_symlots.assign(symbol=df_symlots.symbol.str.replace("&", "%26"))
+    df_symlots = df_symlots.assign(
+        symbol=df_symlots.symbol.str.replace("&", "%26"))
 
     # convert symbols - friendly to IBKR
     df_symlots = df_symlots.assign(symbol=df_symlots.symbol.str.slice(0, 9))
-    ntoi = {"M%26M": "MM", "M%26MFIN": "MMFIN", "L%26TFH": "LTFH", "NIFTY": "NIFTY50"}
+    ntoi = {"M%26M": "MM", "M%26MFIN": "MMFIN",
+            "L%26TFH": "LTFH", "NIFTY": "NIFTY50"}
     df_symlots.symbol = df_symlots.symbol.replace(ntoi)
 
     # differentiate between index and stock
     df_symlots.insert(
-        1, "secType", np.where(df_symlots.symbol.str.contains("NIFTY"), "IND", "STK")
+        1, "secType", np.where(
+            df_symlots.symbol.str.contains("NIFTY"), "IND", "STK")
     )
 
     df_symlots["exchange"] = "NSE"
     df_symlots["currency"] = "INR"
     df_symlots["contract"] = [
-        Contract(symbol=symbol, secType=secType, exchange=exchange, currency=currency)
+        Contract(symbol=symbol, secType=secType,
+                 exchange=exchange, currency=currency)
         for symbol, secType, exchange, currency in zip(
             df_symlots.symbol,
             df_symlots.secType,
@@ -643,13 +615,19 @@ def get_nse() -> pd.DataFrame:
 
 
 # .SNP df
-def get_snp() -> pd.DataFrame():
+def get_snp(RUN_ON_PAPER: bool = True) -> pd.DataFrame():
     """Generate symlots for SNP 500 weeklies + those in portfolio as a DataFrame"""
 
     MARKET = "SNP"
 
+    # ... set parameters from var.yml
+
     ibp = Vars(MARKET.upper())
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
 
     # Get the weeklies
     dls = "http://www.cboe.com/products/weeklys-options/available-weeklys"
@@ -705,10 +683,12 @@ def get_snp() -> pd.DataFrame():
     df_syms = pd.concat(
         [
             pd.DataFrame(
-                {"symbol": list(more_syms), "secType": "STK", "exchange": "SMART"}
+                {"symbol": list(more_syms), "secType": "STK",
+                 "exchange": "SMART"}
             ),
             pd.DataFrame(
-                {"symbol": list(more_syms), "secType": "IND", "exchange": "SMART"}
+                {"symbol": list(more_syms), "secType": "IND",
+                 "exchange": "SMART"}
             ),
             df_symlots,
         ],
@@ -743,7 +723,9 @@ def get_symlots(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
     # * GET THE SYMLOTS
-    df_symlots = get_nse() if MARKET.upper() == "NSE" else get_snp()
+    df_symlots = (
+        get_nse() if MARKET.upper() == "NSE" else get_snp(RUN_ON_PAPER=RUN_ON_PAPER)
+    )
 
     # ... prepare underlying contracts
     df_sl = df_symlots.drop_duplicates(subset=["symbol"])
@@ -776,7 +758,8 @@ def get_symlots(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
         # remove beyond SNP duplicates with secType
         df_symlots = df_symlots[
-            df_symlots.secType == df_symlots.contract.apply(lambda x: x.secType)
+            df_symlots.secType == df_symlots.contract.apply(
+                lambda x: x.secType)
         ].reset_index(drop=True)
 
         df_symlots.to_pickle(DATAPATH.joinpath("df_symlots.pkl"))
@@ -920,7 +903,8 @@ def get_chains(
     df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
 
     if MARKET == "NSE":
-        df_chains["expiryM"] = df_chains.expiry.apply(lambda d: d[:4] + "-" + d[4:6])
+        df_chains["expiryM"] = df_chains.expiry.apply(
+            lambda d: d[:4] + "-" + d[4:6])
         cols1 = ["symbol", "expiryM"]
         df_chains = (
             df_chains.set_index(cols1)
@@ -981,11 +965,11 @@ def get_und_margins(
                 algo=margin,
                 cts=und_cos,
                 CONCURRENT=50 * 4,
-                TIMEOUT=5,
+                TIMEOUT=5.5,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME=OP_FILENAME,
-                **{"FILL_DELAY": 5},
+                **{"FILL_DELAY": 5.5},
             )
         )
 
@@ -993,23 +977,23 @@ def get_und_margins(
     return df_und_margins
 
 
-# . generate and qualify options
+# . synchronously qualify
 def qualify_opts(
-    MARKET: str,
-    RUN_ON_PAPER: bool = True,  # Use PAPER account
-    REUSE: bool = True,  # Reuse old df_opts, if available
-    OP_FILENAME: str = "qopts.pkl",  # Filename to save the qualified options
-):
-    ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
+        MARKET: str,
+        BLK_SIZE: int = 200,
+        RUN_ON_PAPER: bool = True,
+        CHECKPOINT: bool = True,
+        OP_FILENAME: str = "qopts.pkl") -> set:
 
-    # ... start the timer
-    opts_time = Timer("qualify all options")
-    opts_time.start()
+    if CHECKPOINT:
+        REJECT_FILE = OP_FILENAME[:4] + '_rejects.pkl'
+
+    ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
     HOST, CID = ibp.HOST, ibp.CID
 
     if RUN_ON_PAPER:
-        print(f"\nQualifying {MARKET} raw options using Paper account\n")
+        print(f"\nQualifying {MARKET} options using Paper account\n")
         PORT = ibp.PAPER
     else:
         PORT = ibp.PORT
@@ -1018,46 +1002,18 @@ def qualify_opts(
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
     # * SETUP LOGS AND CLEAR THEM
-    LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_qopts.log")
+    LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_qualsync.log")
     util.logToFile(path=LOGFILE, level=30)
     with open(LOGFILE, "w"):
         pass
 
-    # * LOAD FILES
+    # * LOAD THE FILES
     df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
+    df_ch = pd.concat((df_chains.assign(right="P"),
+                       df_chains.assign(right="C")), ignore_index=True)
 
-    if REUSE:  # remove existing option symbols from chains
-        try:
-            qopts = pd.read_pickle(DATAPATH.joinpath(OP_FILENAME))
-
-            # Set up qopts to the last but one symbol for recreation
-            last_sym = [q.symbol for q in qopts][-1:][0]
-            qopt1 = [q for q in qopts if q.symbol != last_sym]
-            qopts = pd.Series(qopt1, name="contract")
-
-            available_opts = {q.symbol for q in qopts}
-            df_chains = df_chains[~df_chains.symbol.isin(available_opts)]
-
-        except FileNotFoundError:
-            print(
-                f"\n{OP_FILENAME} for {MARKET} is not found!\n"
-                + f"All chains will be qualified!!\n"
-            )
-    else:
-        qopts = pd.Series([], dtype=object, name="contract")
-
-    if df_chains.empty:
-        print(
-            f"\nqopts.pkl has all df_chains symbols and so it is not recreated!"
-            + f"\nRun qualify_opts with REUSE = False to recreate entirely new qopts.pkl\n"
-        )
-        return qopts
-
-    df_ch = pd.concat(
-        (df_chains.assign(right="P"), df_chains.assign(right="C")), ignore_index=True
-    )
     # ... build the options
-    opts = [
+    cts = [
         Option(s, e, k, r, x)
         for s, e, k, r, x in zip(
             df_ch.symbol,
@@ -1068,30 +1024,99 @@ def qualify_opts(
         )
     ]
 
-    # ... generate new options
-    with IB().connect(HOST, PORT, CID) as ib:
-        new_qopts = ib.run(
-            executeAsync(
-                ib=ib,
-                algo=qualify,
-                cts=opts,
-                CONCURRENT=100,
-                TIMEOUT=5,
-                post_process=save_df,
-                DATAPATH=DATAPATH,
-                OP_FILENAME="z_new_qopts_temp.pkl",
+    # .initialize
+    qopts = pd.Series([], dtype=object)  # for successful options
+    qropts = pd.Series([], dtype=object)  # for rejected options
+
+    if CHECKPOINT:  # re-use qopts file if available
+
+        cols = ['symbol', 'expiry',
+                'strike', 'right']
+
+        try:
+            qopts = pd.read_pickle(DATAPATH.joinpath(
+                OP_FILENAME))
+
+            # remove duplicates in qopts
+            # for quick manipulation of drop_duplicates!!
+            temp_df = util.df(qopts.to_list())\
+                .assign(contract=qopts)\
+                .rename(columns={"lastTradeDateOrContractMonth": "expiry"})\
+                .drop_duplicates(subset=cols)\
+                .drop('conId', 1)\
+                .reset_index()
+
+            qopts = temp_df.contract
+
+            all_df = util.df(cts)\
+                .iloc[:, :6]\
+                .rename(columns={"lastTradeDateOrContractMonth": "expiry"})\
+                .drop("conId", 1)
+
+            # handling unqualified reject files
+            try:
+                qropts = pd.read_pickle(DATAPATH.joinpath(
+                    REJECT_FILE))
+
+                # remove duplicates in reject df
+                reject_df = util.df(qropts.to_list())\
+                    .assign(contract=qropts)\
+                    .rename(columns={"lastTradeDateOrContractMonth": "expiry"})\
+                    .drop_duplicates(subset=cols)\
+                    .drop('conId', 1)\
+                    .reset_index()
+
+                qropts = reject_df.contract
+
+            except FileNotFoundError:
+                reject_df = pd.DataFrame([])
+                pass
+
+            # rebuild cts
+            df_ch1 = pd.concat([all_df, temp_df]).drop_duplicates(
+                subset=cols, keep=False)
+            df_ch2 = pd.concat([df_ch1, reject_df]).drop_duplicates(
+                subset=cols, keep=False)
+            cts = [
+                Option(s, e, k, r, x)
+                for s, e, k, r, x in zip(
+                    df_ch2.symbol,
+                    df_ch2.expiry,
+                    df_ch2.strike,
+                    df_ch2.right,
+                    ["NSE" if MARKET.upper() == "NSE" else "SMART"] * len(df_ch2),
+                )
+            ]
+
+        except FileNotFoundError as fe:
+            print(
+                f"\n{OP_FILENAME} checkpoint (or) {REJECT_FILE} reject file is not available." +
+                f"\n Error: {fe}. \nAll options will be qualified.\n"
             )
-        )
 
-    # ... merge the qualified options
-    qopts = pd.concat([qopts, new_qopts], ignore_index=True).drop_duplicates()
+    # ... start the timer
+    opts_time = Timer("qualify options")
+    opts_time.start()
 
-    # ... pickle and clean
-    qopts.to_pickle(DATAPATH.joinpath("qopts.pkl"))
-    try:
-        os.remove(DATAPATH.joinpath("z_new_qopts_temp.pkl"))
-    except OSError as e:
-        print(f"No temp file to remove!! Error: {e}")
+    # ..build the raw blocks from cts
+    raw_blks = [cts[i: i + BLK_SIZE] for i in range(0, len(cts), BLK_SIZE)]
+
+    with IB().connect(HOST, PORT, CID) as ib:
+        for b in tqdm(
+            raw_blks, desc=f"{MARKET} opts qualified:", bar_format=BAR_FORMAT,
+        ):
+
+            # Success
+            qs = ib.qualifyContracts(*b)
+            qopts = qopts.append(pd.Series(
+                qs, dtype=object, name='qualified'), ignore_index=True)
+            qopts.to_pickle(DATAPATH.joinpath(OP_FILENAME))
+
+            # Rejects
+            rejects = [c for c in b if not c.conId]
+            qropts = qropts.append(pd.Series(
+                rejects, dtype=object, name='rejected'), ignore_index=True)
+            qropts.to_pickle(DATAPATH.joinpath(REJECT_FILE))
 
     opts_time.stop()
 
@@ -1151,7 +1176,8 @@ def opts_pm(
     # ... integrate lots (from chains), und_iv  and undPrice
     col1 = ["symbol", "strike", "expiry"]
     df_opt1 = (
-        df_opt1.set_index(col1).join(df_chains.set_index(col1)[["lot"]]).reset_index()
+        df_opt1.set_index(col1).join(
+            df_chains.set_index(col1)[["lot"]]).reset_index()
     )
 
     # ... process dtes
@@ -1160,7 +1186,8 @@ def opts_pm(
     # Make 0 dte positive to avoid sqrt errors
     df_opt1.loc[df_opt1.dte == 0, "dte"] = 1
 
-    df_opt1["und_iv"] = df_opt1.symbol.map(df_unds.set_index("symbol").iv.to_dict())
+    df_opt1["und_iv"] = df_opt1.symbol.map(
+        df_unds.set_index("symbol").iv.to_dict())
     df_opt1["undPrice"] = df_opt1.symbol.map(
         df_unds.set_index("symbol").undPrice.to_dict()
     )
@@ -1174,29 +1201,11 @@ def opts_pm(
         for lot in df_opt1.lot
     ]
 
-    # . get option margins
-    opt_cos = [(c, o) for c, o in zip(opt_contracts, opt_orders)]
-
-    with IB().connect(HOST, PORT, CID) as ib:
-        df_opt_margins = ib.run(
-            executeAsync(
-                ib=ib,
-                algo=margin,
-                cts=opt_cos,
-                CONCURRENT=50 * 4,
-                TIMEOUT=5,
-                post_process=save_df,
-                DATAPATH=DATAPATH,
-                OP_FILENAME="df_opt_margins.pkl",
-                **{"FILL_DELAY": 5},
-            )
-        )
-    # . integrate margin
-    df_opt2 = df_opt1.set_index("conId").join(
-        df_opt_margins.set_index("conId")[["comm", "margin"]]
-    )
-
     # . get option price and iv
+
+    opt_price_time = Timer(f"{MARKET} option prices")
+    opt_price_time.start()
+
     with IB().connect(HOST, PORT, CID) as ib:
         df_opt_prices = ib.run(
             executeAsync(
@@ -1213,10 +1222,38 @@ def opts_pm(
         )
 
     # . integrate price and iv
-    df_opt2 = df_opt2.join(
-        df_opt_prices.set_index("conId")[["bid", "ask", "close", "last", "iv", "price"]]
+    df_opt1 = df_opt1.join(
+        df_opt_prices.set_index(
+            "conId")[["bid", "ask", "close", "last", "iv", "price"]]
     ).reset_index()
+    opt_price_time.stop()
 
+    # . get option margins
+    opt_margin_time = Timer(f"{MARKET} option margins")
+    opt_margin_time.start()
+
+    opt_cos = [(c, o) for c, o in zip(opt_contracts, opt_orders)]
+
+    with IB().connect(HOST, PORT, CID) as ib:
+        df_opt_margins = ib.run(
+            executeAsync(
+                ib=ib,
+                algo=margin,
+                cts=opt_cos,
+                CONCURRENT=200,
+                TIMEOUT=5.8,
+                post_process=save_df,
+                DATAPATH=DATAPATH,
+                OP_FILENAME="df_opt_margins.pkl",
+                **{"FILL_DELAY": 5.8},
+            )
+        )
+    # . integrate margin
+    df_opt2 = df_opt1.set_index("conId").join(
+        df_opt_margins.set_index("conId")[["comm", "margin"]]
+    )
+
+    opt_margin_time.stop()
     opt_pm_time.stop()
 
     # * GET ROM AND SET EXPECTED OPTION PRICE
@@ -1257,7 +1294,8 @@ def opts_pm(
         / df_opt2.dte
     )
 
-    df_opt2 = df_opt2.sort_values("rom", ascending=False).reset_index(drop=True)
+    df_opt2 = df_opt2.sort_values(
+        "rom", ascending=False).reset_index(drop=True)
 
     df_opt2.to_pickle(DATAPATH.joinpath(OP_FILENAME))
 
@@ -1282,16 +1320,6 @@ if __name__ == "__main__":
     else:
         DELETE_PICKLES = False
 
-    # . fourth ... check if the qopts.pkl are to be deleted
-    reuse_qots_ip = input(
-        "\n\nRe-use `qopts.pkl`? (Y/N) \n...Note: regenerting qopts takes time!\n"
-    ).lower()
-    if reuse_qots_ip == "y":
-        REUSE = True
-    else:
-        REUSE = False
-        print(f"...{MARKET} qopts will be over-written!!\n")
-
     # * SET THE VARIABLES
 
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
@@ -1313,7 +1341,6 @@ if __name__ == "__main__":
             "df_ohlcs.pkl",
             "df_chains.pkl",
             "df_und_margins.pkl",
-            "z_new_qopts_temp.pkl",
         ]:
             try:
                 os.remove(DATAPATH.joinpath(f))
@@ -1328,29 +1355,21 @@ if __name__ == "__main__":
 
     und_cts = list(df_symlots.contract.unique())
 
-    df_unds = get_unds(
-        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
-    )
+    df_unds = get_unds(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER,
+                       und_cts=und_cts, savedf=True)
 
     df_ohlcs = get_ohlcs(
-        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
-    )
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True)
 
     df_chains = get_chains(
-        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
-    )
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True)
 
     df_und_margins = get_und_margins(
-        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True
-    )
+        MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, und_cts=und_cts, savedf=True)
 
-    # qopts = qualify_opts(
-    #     MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER, REUSE=REUSE, OP_FILENAME="qopts.pkl"
-    # )
-
-    qopts = qopts_sync(
-        MARKET=MARKET, BLK_SIZE=1000, RUN_ON_PAPER=RUN_ON_PAPER, OP_FILENAME="qopts.pkl"
-    )
+    qopts = qualify_opts(MARKET=MARKET, BLK_SIZE=200,
+                         RUN_ON_PAPER=RUN_ON_PAPER,
+                         CHECKPOINT=True, OP_FILENAME="qopts.pkl")
 
     qopts_w_pm = opts_pm(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER)
 
