@@ -71,11 +71,13 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     # . build df_fresh
     df_fresh = df_opts[df_opts.symbol.isin(fresh)]
 
-    df_fresh = df_fresh[~df_fresh.symbol.isin(ibp.BLACKLIST)]  # remove blacklist
+    df_fresh = df_fresh[~df_fresh.symbol.isin(
+        ibp.BLACKLIST)]  # remove blacklist
 
     # . remove dtes
     df_fresh.insert(3, "dte", df_fresh.expiry.apply(get_dte))
-    df_fresh = df_fresh[df_fresh.dte.between(ibp.MINDTE, ibp.MAXDTE, inclusive=True)]
+    df_fresh = df_fresh[df_fresh.dte.between(
+        ibp.MINDTE, ibp.MAXDTE, inclusive=True)]
 
     # .remove options within stdev fence
 
@@ -88,7 +90,8 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
 
     # . compute One stdev
     df_fresh = df_fresh.assign(
-        sd1=df_fresh.undPrice * df_fresh.iv * (df_fresh.dte / 365).apply(math.sqrt)
+        sd1=df_fresh.undPrice * df_fresh.iv *
+        (df_fresh.dte / 365).apply(math.sqrt)
     )
 
     hi_sd = df_fresh.undPrice + df_fresh.sd1 * ibp.CALLSTDMULT
@@ -113,12 +116,14 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     # ... sort and pick top options around the fence [ref: https://stackoverflow.com/questions/64864630]
     # . reverse strike for Calls to get the right sort order for top values
     df = df_fresh.assign(
-        value=np.where(df_fresh.right == "C", -1 * df_fresh.strike, df_fresh.strike)
+        value=np.where(df_fresh.right == "C", -1 *
+                       df_fresh.strike, df_fresh.strike)
     )
 
     # . build cumcount series with index aligned to df
     s = (
-        (df.sort_values(["symbol", "dte", "value"]).groupby(["symbol", "dte", "right"]))
+        (df.sort_values(["symbol", "dte", "value"]).groupby(
+            ["symbol", "dte", "right"]))
         .cumcount()
         .reindex(df.index)
     )
@@ -169,6 +174,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
                 DATAPATH=DATAPATH,
                 **{"FILL_DELAY": 5.5},
                 OP_FILENAME="",
+                SHOW_TQDM=False,
             )
         )
 
@@ -196,6 +202,7 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
                 post_process=save_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME="",
+                SHOW_TQDM=False,
                 **{"FILL_DELAY": 5.5},
             )
         )
@@ -242,7 +249,8 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
             (df_fresh2.strike - df_fresh2.undPrice).clip(0, None),
         )
     )
-    df_fresh2 = df_fresh2.assign(timevalue=df_fresh2.price - df_fresh2.intrinsic)
+    df_fresh2 = df_fresh2.assign(
+        timevalue=df_fresh2.price - df_fresh2.intrinsic)
 
     # . compute rom based on timevalue, remove zero rom and down-sort on it
     df_fresh2["rom"] = (
@@ -279,7 +287,8 @@ def get_fresh(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     df_puts = df_fresh2[df_fresh2.right == "P"].reset_index(drop=True)
 
     # ... initiate Excel writer object
-    writer = pd.ExcelWriter(DATAPATH.joinpath("df_fresh.xlsx"), engine="xlsxwriter")
+    writer = pd.ExcelWriter(DATAPATH.joinpath(
+        "df_fresh.xlsx"), engine="xlsxwriter")
 
     df_fresh2.to_excel(
         writer, sheet_name="All", float_format="%.2f", index=False, freeze_panes=(1, 1)

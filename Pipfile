@@ -18,6 +18,7 @@ nest-asyncio = "*"
 lxml = "*"
 ta = "*"
 tqdm = "*"
+scipy = "*"
 
 [requires]
 python_version = "*"

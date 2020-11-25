@@ -10,6 +10,7 @@ COMMON:
   - PendingSubmit
   - PreSubmitted
   - Submitted
+  BAR_FORMAT: "{desc:<10}{percentage:3.0f}%|{bar:30}{r_bar}{bar:-10b}"
 NSE:
   EXCHANGE: 'NSE'
   CURRENCY: 'INR'

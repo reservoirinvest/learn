@@ -2,9 +2,16 @@
 Interactive Brokers programs
 
 # Incomplete TODOs
+* [ ] Selection for **engine**
+* [ ] Split `price` and `margin` for independent checkpoint-based updates
+* [ ] `Friday` function for weekly trades in SNP
 * [ ] Add `hi52` and `lo52` to **fresh()**
 * [ ] Add YAML `filter` selection fo **fresh()**
-* [ ] Make a `Connection` class that detects if server is up or not 
+* [ ] Make a `Connection` class that detects if server is up or not
+
+## TODO: Questions for analysis
+* Maximum grosspos for NSE (strike * lot). This should be the grosspos benchmark.
+* Extract bid-ask-last for NSE from website. This is useful for pre-market trade setup.
 
 # Core Functions
 * Usually `RUN_ON_PAPER` in the background
