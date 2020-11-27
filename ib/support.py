@@ -70,6 +70,15 @@ class Timer:
         self._start_time = None
 
 
+def yes_or_no(question):
+    while True:
+        answer = input(question + ' (y/n): ').lower().strip()
+        if answer in ('y', 'yes', 'n', 'no'):
+            return answer in ('y', 'yes')
+        else:
+            print('You must answer yes or no.')
+            
+
 def abs_int(x):
     """Makes a proper int or give out a none. Used to prevent divide-by-zero for pandas.
 
@@ -146,7 +155,7 @@ def get_market(msg: str = "") -> str:
             break  # success and exit loop
 
     return MARKET
-
+    
 
 def get_dte(dt):
     """Gets days to expiry
@@ -430,4 +439,4 @@ def watchlist(MARKET: str, symbols: list, FILE_NAME="watchlist.csv") -> pd.DataF
 
 if __name__ == "__main__":
 
-    print(get_openorders("SNP"))
+    pass

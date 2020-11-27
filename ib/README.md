@@ -37,7 +37,7 @@ Interactive Brokers programs
 ## 2. DFRQ FUNCTION:
 * For remaining quantities `remq` based on position and risk
 
-## 3. FRESH FUNCTION:
+## 3. NAKEDS FUNCTION:
 
 * run `dfrq`
 
