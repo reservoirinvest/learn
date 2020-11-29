@@ -17,15 +17,13 @@ from tqdm import tqdm
 from support import Timer, Vars, calcsdmult_df, get_dte, get_market, quick_pf
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
-BAR_FORMAT = "{desc:<10}{percentage:3.0f}%|{bar:30}{r_bar}{bar:-10b}"
+BAR_FORMAT = "{desc:<10}{percentage:3.0f}%|{bar:25}{r_bar}{bar:-10b}"
 
 # ** SINGLE FUNCTIONS
 # * Independent functions - ready to be called.
-# .NSE df
+
 
 # .qualify
-
-
 async def qualify(ib: IB, c: Union[pd.Series, list, tuple,
                                    Contract]) -> pd.Series:
 
@@ -72,7 +70,7 @@ async def ohlc(ib: IB,
 
 # .Underlying
 async def und(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
-    """Use CONCURRENT=40, TMEOUT=8 for optimal executeAsync results"""
+    """Use CONCURRENT=40, TIMEOUT=8 for optimal executeAsync results"""
 
     if isinstance(c, tuple):
         c = c[0]
@@ -101,6 +99,18 @@ async def und(ib: IB, c, FILL_DELAY=8) -> pd.DataFrame:
     df3 = df2[[c for c in df2.columns if df2.loc[0, c]]].reset_index(drop=True)
 
     # . Implied volatility correction
+
+    hv = None
+    try:
+        hv = df3.histVolatility.iloc[0]
+        df3.impliedVolatility  # check if iv is available
+    except AttributeError:
+        print(f"\niv missing for {df3.symbol.to_list()}")
+        if hv:
+            df3['impliedVolatility'] = hv
+            print("...iv is replaced by historical volatility")
+        else:
+            df3['impliedVolatility'] = np.nan
 
     # rename column
     df3.rename(columns={"impliedVolatility": "iv"}, inplace=True)
@@ -426,7 +436,7 @@ async def executeAsync(
     if SHOW_TQDM:
         pbar = tqdm(
             total=len(remaining), desc=f"{algo.__name__}: ",
-            bar_format=BAR_FORMAT
+            bar_format=BAR_FORMAT, ncols=80,
         )
 
     # Get the results
@@ -751,7 +761,7 @@ def get_snp(RUN_ON_PAPER: bool = True) -> pd.DataFrame():
 # .. generate symbols and lots
 def get_symlots(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
-    u_qual_time = Timer(MARKET.lower() + " unds qual")
+    u_qual_time = Timer(MARKET.lower() + " symlot qualification")
     u_qual_time.start()
 
     # ... set parameters from var.yml
@@ -768,6 +778,9 @@ def get_symlots(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
     # * GET THE SYMLOTS
     df_symlots = (get_nse() if MARKET.upper() == "NSE" else get_snp(
         RUN_ON_PAPER=RUN_ON_PAPER))
+
+    # ... remove YAML blacklisted contracts
+    df_symlots = df_symlots[~df_symlots.symbol.isin(ibp.BLACKLIST)]
 
     # ... prepare underlying contracts
     df_sl = df_symlots.drop_duplicates(subset=["symbol"])
@@ -868,7 +881,7 @@ def get_unds(MARKET: str,
              savedf: bool = False,
              RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
-    und_time = Timer(MARKET.lower() + "_unds")
+    und_time = Timer(MARKET.lower() + " underlyings")
     und_time.start()
 
     # ... set parameters from var.yml
@@ -882,6 +895,8 @@ def get_unds(MARKET: str,
 
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
     df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
+    df_symlots = df_symlots[df_symlots.symbol.isin(
+        [c.symbol for c in und_cts])].reset_index(drop=True)
 
     if savedf:
         OP_FILENAME = "df_unds.pkl"
@@ -894,7 +909,7 @@ def get_unds(MARKET: str,
                 ib=ib,
                 algo=und,
                 cts=und_cts,
-                CONCURRENT=39,
+                CONCURRENT=40,
                 TIMEOUT=8,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
@@ -909,19 +924,8 @@ def get_unds(MARKET: str,
 
     und_cos = [(c, o) for c, o in zip(und_cts, und_ords)]
 
-    with IB().connect(HOST, PORT, CID) as ib:
-        df_und_margins = ib.run(
-            executeAsync(
-                ib=ib,
-                algo=margin,
-                cts=und_cos,
-                CONCURRENT=50 * 4,
-                TIMEOUT=5.5,
-                post_process=save_df,
-                DATAPATH=DATAPATH,
-                OP_FILENAME="",
-                **{"FILL_DELAY": 5.5},
-            ))
+    df_und_margins = get_margins(
+        MARKET=MARKET, cos=und_cos, msg='und margins')
 
     df_und_margins[['conId', 'margin', 'comm']]
     df_unds = df_unds.assign(conId=[c.conId for c in df_unds.contract])
@@ -958,6 +962,8 @@ def get_chains(MARKET: str,
 
     # ... for integrating lots to chains
     df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
+    df_symlots = df_symlots[df_symlots.symbol.isin(
+        [c.symbol for c in und_cts])].reset_index(drop=True)
 
     if savedf:
         OP_FILENAME = "df_chains.pkl"
@@ -978,7 +984,7 @@ def get_chains(MARKET: str,
             ))
 
     # ..put lots into the chains
-    df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
+    # df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
 
     if MARKET == "NSE":
         df_chains["expiryM"] = df_chains.expiry.apply(
@@ -994,19 +1000,27 @@ def get_chains(MARKET: str,
     df_chains = df_chains.dropna().reset_index(drop=True)
 
     # ...write back to pickle
-    df_chains.to_pickle(DATAPATH.joinpath("df_chains.pkl"))
+    if savedf:
+        df_chains.to_pickle(DATAPATH.joinpath(OP_FILENAME))
 
     chain_time.stop()
 
+    return df_chains
 
-# .. get underlying margins
-def get_und_margins(MARKET: str,
-                    und_cts: list,
-                    savedf: bool = False,
-                    RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
-    und_mgn_time = Timer(MARKET.lower() + "_und_margins")
-    und_mgn_time.start()
+# . margins
+def get_margins(MARKET: str,
+                cos: list,
+                msg: str = 'margins',
+                RUN_ON_PAPER: bool = False,
+                CONCURRENT: int = 200,
+                TIMEOUT: int = 5.5,
+                FILL_DELAY: int = 5.5,
+                OP_FILENAME: str = '',
+                ) -> pd.DataFrame:
+
+    margin_time = Timer(MARKET.lower() + f" {msg}")
+    margin_time.start()
 
     # ... set parameters from var.yml
     ibp = Vars(MARKET.upper())
@@ -1019,41 +1033,65 @@ def get_und_margins(MARKET: str,
 
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
-    df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
-
-    if savedf:
-        OP_FILENAME = "df_und_margins.pkl"
-    else:
-        OP_FILENAME = ""
-
-    und_ords = ([MarketOrder("SELL", 100)] * len(df_symlots) if MARKET.upper()
-                == "SNP" else [MarketOrder("SELL", q) for q in df_symlots.lot])
-
-    und_cos = [(c, o) for c, o in zip(und_cts, und_ords)]
-
     with IB().connect(HOST, PORT, CID) as ib:
-        df_und_margins = ib.run(
+        df = ib.run(
             executeAsync(
                 ib=ib,
                 algo=margin,
-                cts=und_cos,
-                CONCURRENT=50 * 4,
-                TIMEOUT=5.5,
+                cts=cos,
+                CONCURRENT=CONCURRENT,
+                TIMEOUT=TIMEOUT,
                 post_process=save_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME=OP_FILENAME,
-                **{"FILL_DELAY": 5.5},
+                **{"FILL_DELAY": FILL_DELAY},
             ))
 
-    und_mgn_time.stop()
-    return df_und_margins
+    margin_time.stop()
+    return df
 
+
+# . get contract prices
+def get_prices(cts: Union[set, list, pd.Series],
+               MARKET: str = '',
+               RUN_ON_PAPER: bool = False,
+               FILL_DELAY: int = 8):
+    """Gets price of list/set/series of contracts"""
+
+    # ... set parameters from var.yml
+    ibp = Vars(MARKET.upper())
+
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
+
+    with IB().connect(HOST, PORT, CID) as ib:
+        df = ib.run(
+            executeAsync(
+                ib=ib,
+                algo=price,
+                cts=cts,
+                CONCURRENT=40,
+                TIMEOUT=8,
+                post_process=save_df,
+                **{
+                    "FILL_DELAY": FILL_DELAY
+                },
+            )
+        )
+
+    return df
 
 # . synchronously qualify
+
+
 def qualify_opts(MARKET: str,
                  BLK_SIZE: int = 200,
                  RUN_ON_PAPER: bool = True,
                  CHECKPOINT: bool = True,
+                 USE_YAML_DTE: bool = True,
                  OP_FILENAME: str = "qopts.pkl") -> set:
 
     if CHECKPOINT:
@@ -1080,6 +1118,13 @@ def qualify_opts(MARKET: str,
 
     # * LOAD THE FILES
     df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
+
+    if USE_YAML_DTE:
+        df_chains = df_chains[df_chains.dte.between(ibp.MINDTE,
+                                                    ibp.MAXDTE,
+                                                    inclusive=True)]\
+            .reset_index(drop=True)
+
     df_ch = pd.concat(
         (df_chains.assign(right="P"), df_chains.assign(right="C")),
         ignore_index=True)
@@ -1172,8 +1217,8 @@ def qualify_opts(MARKET: str,
     with IB().connect(HOST, PORT, CID) as ib:
         for b in tqdm(
                 raw_blks,
-                desc=f"{MARKET} opts qualified:",
-                bar_format=BAR_FORMAT,
+                desc=f"{MARKET} opts qual:",
+                bar_format=BAR_FORMAT, ncols=80
         ):
 
             # Success
@@ -1189,6 +1234,10 @@ def qualify_opts(MARKET: str,
                                              name='rejected'),
                                    ignore_index=True)
             qropts.to_pickle(DATAPATH.joinpath(REJECT_FILE))
+
+    # to prevent TimeoutError()
+    ib.disconnect()
+    IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
 
     opts_time.stop()
 
@@ -1376,7 +1425,8 @@ def opt_margins(
 
     # ... integrate lots (from chains)
 
-    df_chains = pd.read_pickle(DATAPATH.joinpath('df_chains.pkl'))
+    df_chains = pd.read_pickle(DATAPATH.joinpath(
+        'df_chains.pkl')).drop_duplicates()
 
     col1 = ["symbol", "strike", "expiry"]
     df_q_opts = (df_q_opts.set_index(col1).join(
@@ -1428,11 +1478,11 @@ def opt_margins(
                 **{"FILL_DELAY": 6.5},
             ))
 
-    opt_margin_time.stop()
-
-    # remove NaN's from margins
+    # remove NaN from margins
     df_opt_margins = df_opt_margins[~df_opt_margins.margin.isnull()]\
         .reset_index(drop=True)
+
+    opt_margin_time.stop()
 
     return df_opt_margins
 
@@ -1549,94 +1599,23 @@ def get_opts(
     return df_opt
 
 
+# !!! TEMPORARY TO CHECK get_unds
 if __name__ == "__main__":
 
-    MARKET = get_market("Use Engine for:")
-
-    # . second ... ask if the routines need to run on paper
-    paper_ip = input("\nShould Engine run on `Paper`? (Y/N) ").lower()
-    if paper_ip == "y":
-        RUN_ON_PAPER = True
-    else:
-        RUN_ON_PAPER = False
-
-    # . third ... check if the existing pickles need to be deleted
-    delete_ip = input("\n\nDelete Engine pickles? (Y/N) ").lower()
-    if delete_ip == "y":
-        DELETE_PICKLES = True
-    else:
-        DELETE_PICKLES = False
-
-    # * SET THE VARIABLES
+    MARKET = 'SNP'
 
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
-    # * SETUP LOGS AND CLEAR THEM
-    LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
-    LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_base.log")
-    util.logToFile(path=LOGFILE, level=30)
-    with open(LOGFILE, "w"):
-        pass
+    dfrq = pd.read_pickle(DATAPATH.joinpath('dfrq.pkl'))
+    df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
 
-    # * DELETE UNNECESSARY FILES
-    if DELETE_PICKLES:
-        for f in [
-                "df_symlots.pkl",
-                "df_unds.pkl",
-                "df_ohlcs.pkl",
-                "df_chains.pkl",
-                "df_opt_prices.pkl",
-                "df_opt_margins.pkl",
-        ]:
-            try:
-                os.remove(DATAPATH.joinpath(f))
-            except OSError as e:
-                pass
+    uncov = dfrq[(dfrq.status == 'uncovered') | (
+        dfrq.status == 'dodo')].symbol.unique()
+    uncov_cts = df_symlots[df_symlots.symbol.isin(uncov)].contract.to_list()
 
-    # .. start the timer
-    all_time = Timer("Engine")
-    all_time.start()
+    x = get_unds(MARKET=MARKET, und_cts=uncov_cts,
+                 savedf=False, RUN_ON_PAPER=False)
 
-    df_symlots = get_symlots(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER)
-
-    und_cts = list(df_symlots.contract.unique())
-
-    df_unds = get_unds(MARKET=MARKET,
-                       RUN_ON_PAPER=RUN_ON_PAPER,
-                       und_cts=und_cts,
-                       savedf=True)
-
-    df_ohlcs = get_ohlcs(MARKET=MARKET,
-                         RUN_ON_PAPER=RUN_ON_PAPER,
-                         und_cts=und_cts,
-                         savedf=True)
-
-    df_chains = get_chains(MARKET=MARKET,
-                           RUN_ON_PAPER=RUN_ON_PAPER,
-                           und_cts=und_cts,
-                           savedf=True)
-
-    df_und_margins = get_und_margins(MARKET=MARKET,
-                                     RUN_ON_PAPER=RUN_ON_PAPER,
-                                     und_cts=und_cts,
-                                     savedf=True)
-
-    qopts = qualify_opts(MARKET=MARKET,
-                         BLK_SIZE=200,
-                         RUN_ON_PAPER=RUN_ON_PAPER,
-                         CHECKPOINT=True,
-                         OP_FILENAME="qopts.pkl")
-
-    df_opt_prices = opt_prices(MARKET=MARKET,
-                               RUN_ON_PAPER=RUN_ON_PAPER,
-                               REUSE=True)
-
-    df_opt_margins = opt_margins(MARKET=MARKET,
-                                 RUN_ON_PAPER=RUN_ON_PAPER,
-                                 REUSE=True)
-
-    df_opts = get_opts(MARKET=MARKET)
-
-    all_time.stop()
+    print(x.head())

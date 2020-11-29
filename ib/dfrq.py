@@ -36,6 +36,10 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
 
     # * GET PNL AND PORTFOLIO
 
+    # ... load files
+    df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
+    df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
+
     # ... portfolio
     with IB().connect(ibp.HOST, ibp.PORT, ibp.CID) as ib:
         df_pf = quick_pf(ib)
@@ -43,66 +47,77 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
         IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
 
     # * GET MARGINS CONSUMED BY PORTFOLIO
-    pf_raw_cts = [Contract(conId=c) for c in df_pf.conId]
 
-    # .qualify portfolio contracts
-    with IB().connect(HOST, PORT, CID) as ib:
-        pf_cts = ib.run(qualify(ib, pf_raw_cts))
+    if not df_pf.empty:
+        pf_raw_cts = [Contract(conId=c) for c in df_pf.conId]
 
-    # .get orders and make cos
-    df_pf = df_pf.assign(contract=pf_cts)
-    df_pf = df_pf.assign(
-        order=[
-            MarketOrder("SELL", abs(p)) if p > 0 else MarketOrder("BUY", abs(p))
-            for p in df_pf.position
-        ]
-    )
+        # .qualify portfolio contracts
+        with IB().connect(HOST, PORT, CID) as ib:
+            pf_cts = ib.run(qualify(ib, pf_raw_cts))
 
-    cos = [(c, o) for c, o in zip(df_pf.contract, df_pf.order)]
+        # .get orders and make cos
+        df_pf = df_pf.assign(contract=pf_cts)
+        df_pf = df_pf.assign(
+            order=[
+                MarketOrder("SELL", abs(p)) if p > 0 else MarketOrder(
+                    "BUY", abs(p))
+                for p in df_pf.position
+            ]
+        )
 
-    # .get margins
-    with IB().connect(HOST, PORT, CID) as ib:
-        df_pfm = ib.run(
-            executeAsync(
-                ib=ib,
-                algo=margin,
-                cts=cos,
-                CONCURRENT=200,
-                TIMEOUT=5,
-                post_process=save_df,
-                OP_FILENAME="",
-                **{"FILL_DELAY": 5},
+        cos = [(c, o) for c, o in zip(df_pf.contract, df_pf.order)]
+
+        # .get margins
+        with IB().connect(HOST, PORT, CID) as ib:
+            df_pfm = ib.run(
+                executeAsync(
+                    ib=ib,
+                    algo=margin,
+                    cts=cos,
+                    CONCURRENT=200,
+                    TIMEOUT=5,
+                    post_process=save_df,
+                    OP_FILENAME="",
+                    **{"FILL_DELAY": 5},
+                )
+            )
+
+        df_pf = (
+            df_pf.set_index("conId")
+            .join(df_pfm[["conId", "margin", "comm"]].set_index("conId"))
+            .reset_index()
+            .drop("order", 1)
+        )
+
+        # * GET GROSS POSITIONS
+        # .map lots for the options
+        df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
+        lotmap = df_symlots[["symbol", "lot"]].set_index(
+            "symbol").to_dict("dict")["lot"]
+        lot = np.where(df_pf.secType == "OPT", df_pf.symbol.map(lotmap), 1)
+        df_pf.insert(7, "lot", lot)
+
+        # .get gross position (long/short commitment)
+        df_pf = df_pf.assign(
+            grosspos=np.where(
+                df_pf.secType == "OPT",
+                df_pf.strike * df_pf.position * df_pf.lot,
+                df_pf.mktPrice * df_pf.position * df_pf.lot,
             )
         )
 
-    df_pf = (
-        df_pf.set_index("conId")
-        .join(df_pfm[["conId", "margin", "comm"]].set_index("conId"))
-        .reset_index()
-        .drop("order", 1)
-    )
+    else:
 
-    # * GET GROSS POSITIONS
-    # .map lots for the options
-    df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
-    lotmap = df_symlots[["symbol", "lot"]].set_index("symbol").to_dict("dict")["lot"]
-    lot = np.where(df_pf.secType == "OPT", df_pf.symbol.map(lotmap), 1)
-    df_pf.insert(7, "lot", lot)
+        # ...extend the empty df_pf
+        df_pf = df_pf.assign(margin=np.nan, comm=np.nan, grosspos=np.nan)
 
-    # .get gross position (long/short commitment)
-    df_pf = df_pf.assign(
-        grosspos=np.where(
-            df_pf.secType == "OPT",
-            df_pf.strike * df_pf.position * df_pf.lot,
-            df_pf.mktPrice * df_pf.position * df_pf.lot,
-        )
-    )
-
-    df_gp = df_pf.groupby("symbol").grosspos.apply(sum).sort_values(ascending=False)
+    df_gp = df_pf.groupby("symbol").grosspos\
+        .apply(sum).sort_values(ascending=False)
 
     # .get lotmap from df_unds
-    df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
-    lotmap = df_symlots[["symbol", "lot"]].set_index("symbol").to_dict("dict")["lot"]
+
+    lotmap = df_symlots[["symbol", "lot"]].set_index(
+        "symbol").to_dict("dict")["lot"]
     s_gross = df_unds.close * df_unds.symbol.map(lotmap)
     dfrq = (
         df_unds.assign(lot=df_unds.symbol.map(lotmap), gross=s_gross)
@@ -119,7 +134,8 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     MAX_GROSSPOS = max(s_gross) if MARKET == "NSE" else s_gross.quantile(0.8)
 
     # .compute remaining quantities from MAX_GROSSPOS
-    remq = (MAX_GROSSPOS - dfrq.grosspos.fillna(0)) / (dfrq.undPrice * dfrq.lot)
+    remq = (MAX_GROSSPOS - dfrq.grosspos.fillna(0)) / \
+        (dfrq.undPrice * dfrq.lot)
     dfrq = dfrq.assign(remq=remq)
 
     dfrq.loc[dfrq.remq < 0, "remq"] = 0  # zerorize negative remq
@@ -129,7 +145,7 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     dfrq.loc[(dfrq.remq == 0) & dfrq.grosspos.isnull(), "remq"] = 1
 
     # * DERIVE STATUSES FROM PORTFOLIO
-    # * partials, fresh, undefended, uncovered, dodo (risky & uncovered), orphan, harvest and balanced
+    # * partials, naked, undefended, uncovered, dodo (risky & uncovered), orphan, harvest and balanced
 
     # ... get the stocks and options
     df_stk = df_pf[df_pf.secType.isin(["STK", "IND"])].reset_index(drop=True)
@@ -142,15 +158,15 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     df_partial = df_pf[m_partial]
     partials = sorted(df_partial.symbol.unique())
 
-    # Fresh: symbols with grosspos = NaN - fresh nakeds
-    m_fresh = dfrq.grosspos.isnull()
-    df_fresh = dfrq[m_fresh]
-    fresh = sorted(df_fresh.symbol.unique())
+    # Nakeds: symbols with grosspos = NaN - fresh nakeds
+    m_naked = dfrq.grosspos.isnull()
+    df_naked = dfrq[m_naked]
+    naked = sorted(df_naked.symbol.unique())
 
-    # Orphan: long calls and long puts not in `Fresh` and whithout underlying stocks
+    # Orphan: long calls and long puts not in `naked` and whithout underlying stocks
     m_orphan = (
         (df_opt.position > 0)
-        & ~df_opt.symbol.isin(fresh)
+        & ~df_opt.symbol.isin(naked)
         & ~df_opt.symbol.isin(df_stk.symbol.unique())
     )
 
@@ -192,13 +208,13 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
 
     # harvest: symbols not in all other statuses
     harvest = set(dfrq.symbol) - set(
-        orphan + uncovered + undefended + dodo + partials + fresh + balanced
+        orphan + uncovered + undefended + dodo + partials + naked + balanced
     )
 
     # map the status to dfrq symbols
 
     status_dict = {
-        "fresh": fresh,
+        "naked": naked,
         "orphan": orphan,
         "uncovered": uncovered,
         "undefended": undefended,

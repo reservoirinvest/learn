@@ -10,7 +10,7 @@ COMMON:
   - PendingSubmit
   - PreSubmitted
   - Submitted
-  BAR_FORMAT: "{desc:<10}{percentage:3.0f}%|{bar:30}{r_bar}{bar:-10b}"
+  BAR_FORMAT: "{desc:<10}{percentage:3.0f}%|{bar:25}{r_bar}{bar:-10b}"
 NSE:
   EXCHANGE: 'NSE'
   CURRENCY: 'INR'
@@ -55,10 +55,17 @@ SNP:
 
   BLACKLIST:
   - VXX
-  - RTN # RTN and UTX have merged
-  - GOOG # price too high!
-  - BKNG # price too high!
-  - AMZN # price too high!
+  # Following indices always fail!
+  - DJX
+  - SPX
+  - MXEA
+  - MXEF
+  - XSP
+  - OEX
+  - XEO
+
+  SPECIALS: # Managed manually (outside automation)
+  - TSLA # for last hour shorts
 
   # For edge
   HONOUR_BREACH: True
@@ -68,17 +75,14 @@ SNP:
   # If both FALLRISE & HILO52 are selected, best of both price will be taken.
   PREC: 0.01
 
-  CALLSTDMULT: 2.1 # Min stdev multiple for calls
-  PUTSTDMULT: 2.8 #  Min stdev multiple for puts
-  MINEXPROM: 2.5
+  CALLSTDMULT: 1.8 # Min stdev multiple for calls
+  PUTSTDMULT: 2 #  Min stdev multiple for puts
+  MINEXPROM: 2
 
   MINROM: 0.4
-  MINOPTSELLPRICE: 0.5
+  MINOPTSELLPRICE: 0.2
   MAXOPTQTY_SYM: 5 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
 
-  SPECIALS: # Managed manually (outside automation)
-  - TSLA # for last hour shorts
-
-  COVERSD: 1.1 # For covered calls and puts
+  COVERSD: 1.4 # For covered calls and puts
   DEFEND_DTE: 30*6 # Min days for fresh protection / roll (e.g. 30 days x 6 months)
   DEFEND_TH: 0.2 # Protection threshold. Underlying should be protected against 20% fall

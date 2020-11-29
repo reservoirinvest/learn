@@ -77,7 +77,7 @@ def yes_or_no(question):
             return answer in ('y', 'yes')
         else:
             print('You must answer yes or no.')
-            
+
 
 def abs_int(x):
     """Makes a proper int or give out a none. Used to prevent divide-by-zero for pandas.
@@ -155,7 +155,7 @@ def get_market(msg: str = "") -> str:
             break  # success and exit loop
 
     return MARKET
-    
+
 
 def get_dte(dt):
     """Gets days to expiry
@@ -407,7 +407,8 @@ def quick_pf(ib) -> pd.DataFrame:
             }
         )
     else:
-        df_pf = pd.read_pickle("./data/template/df_portfolio.pkl")
+        TEMPL_PATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "template")
+        df_pf = pd.read_pickle(TEMPL_PATH.joinpath("df_portfolio.pkl"))
 
     return df_pf
 
