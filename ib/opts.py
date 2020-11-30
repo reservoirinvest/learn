@@ -52,7 +52,8 @@ else:
     else:
         msg = 'price' if RUN_PRICE else 'margin'
 
-    REUSE = yes_or_no(f"\n Reuse {msg} for {MARKET}? ")
+    if RUN_QUALIFY | RUN_PRICE | RUN_MARGIN:
+        REUSE = yes_or_no(f"\n Reuse {msg} for {MARKET}? ")
 
     ASSEMBLE_OPTS = yes_or_no(f"\n Assemble final df_opts for {MARKET}? ")
 
@@ -71,7 +72,7 @@ else:
 if RUN_BASE:
     df_symlots = get_symlots(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER)
 
-    und_cts = list(df_symlots.contract.unique())
+    und_cts = df_symlots.contract.unique()
 
     get_unds(MARKET=MARKET, und_cts=und_cts,
              RUN_ON_PAPER=RUN_ON_PAPER, savedf=True)

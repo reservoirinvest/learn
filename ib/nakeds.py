@@ -185,8 +185,6 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
 
     opt_price_time.stop()
 
-    # . get nakeds option margins (Best: 50*4, TIMEOUT=5, `FILL_DELAY`: 5)
-
     opt_margin_time = Timer(f"{MARKET} naked option margins")
     opt_margin_time.start()
 
@@ -262,11 +260,9 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
         / df_nakeds2.dte
     )
 
-    df_nakeds2 = (
-        df_nakeds2[df_nakeds2.rom > 0]
-        .sort_values("rom", ascending=False)
+    df_nakeds2 = df_nakeds2[df_nakeds2.rom > 0]\
+        .sort_values("rom", ascending=False)\
         .reset_index(drop=True)
-    )
 
     # .establish expRom
     #    ... for those whose RoM is < MINROM, make it equal to MINROM

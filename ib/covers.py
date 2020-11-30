@@ -1,6 +1,9 @@
+# proposes cover trades
+
 import math
 import os
 import pathlib
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -12,8 +15,9 @@ from support import Timer, Vars, calcsdmult_df, get_prec, get_prob, quick_pf
 
 
 # Get covers for stocks
-def get_covers(MARKET: str = 'SNP',
-               COVERSD: float = 1.0,
+def get_covers(MARKET: str = 'SNP',  # currently valid only for SNP!
+               COVERSD: float = 1.3,
+               COV_DEPTH: int = 4,
                SAVEXL: bool = True) -> pd.DataFrame:
 
     covers_time = Timer(f"{MARKET} cover time")
@@ -36,8 +40,6 @@ def get_covers(MARKET: str = 'SNP',
 
     # ... file loads
     df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
-    df_unds = pd.read_pickle(DATAPATH.joinpath('df_unds.pkl'))
-    df_chains = pd.read_pickle(DATAPATH.joinpath('df_chains.pkl'))
     dfrq = pd.read_pickle(DATAPATH.joinpath('dfrq.pkl'))
 
     # * GET STOCKS NOT COVERED FROM DFRQ
@@ -95,10 +97,10 @@ def get_covers(MARKET: str = 'SNP',
     df_ch3 = df_ch3.assign(strikeRef=df_ch3.undPrice +
                            COVERSD * df_ch3.strkDelta)
 
-    # ... get 3 strikes closest to the strikeRef
+    # ... get COV_DEPTH strikes closest to the strikeRef
     df_ch5 = df_ch3.groupby('symbol', as_index=False).apply(lambda g:
                                                             g.iloc[abs(g.strike - g.strikeRef).
-                                                                   argsort()[:3]]).reset_index(drop=True)
+                                                                   argsort()[:COV_DEPTH]]).reset_index(drop=True)
 
     # ... determine the option quantities needed
     df_ch5['qty'] = (df_ch5.position / df_ch5.lot).apply(abs).astype('int')
@@ -149,32 +151,35 @@ def get_covers(MARKET: str = 'SNP',
     df_ch8 = df_ch8.assign(sdmult=calcsdmult_df(df_ch8.strike, df_ch8))
     df_ch8 = df_ch8.assign(prop=df_ch8.sdmult.apply(get_prob))
 
-    df_ch8 = df_ch8[df_ch8.margin == df_ch8.groupby(
-        'symbol').margin.transform(min)].reset_index(drop=True)
-
     # change conId float -> int
-    df_covers = df_ch8.assign(conId=df_ch8.conId.astype('int'))
+    df_ch8 = df_ch8.assign(conId=df_ch8.conId.astype('int'))
 
     # Make the action as SELL
-    df_covers['action'] = 'SELL'
+    df_ch8['action'] = 'SELL'
 
     # ... set cover price to MINOPTSELLPRICE
-    df_covers.loc[df_covers.expPrice < ibp.MINOPTSELLPRICE,
-                  'expPrice'] = ibp.MINOPTSELLPRICE
+    df_ch8.loc[df_ch8.expPrice < ibp.MINOPTSELLPRICE,
+               'expPrice'] = ibp.MINOPTSELLPRICE
 
     # Stage the cover columns
     cols = ['conId', 'contract', 'symbol', 'right', 'strike', 'avgCost',
             'undPrice', 'expiry', 'dte', 'iv', 'strikeRef', 'sdmult', 'prop',
             'lot', 'margin', 'action', 'qty', 'price', 'expPrice']
-    df_covers = df_covers[cols]
+    df_ch8 = df_ch8[cols]
 
-    df_covers = df_covers.assign(
-        revenue=df_covers.price * df_covers.lot * df_covers.qty)
+    df_ch8 = df_ch8.assign(
+        revenue=df_ch8.price * df_ch8.lot * df_ch8.qty)
 
-    df_covers = df_covers.assign(pnl=np.where(df_covers.right == 'C',
-                                              (df_covers.strike - df_covers.avgCost) *
-                                              df_covers.lot + df_covers.revenue,
-                                              (df_covers.avgCost - df_covers.strike) * df_covers.lot + df_covers.revenue))
+    df_ch8 = df_ch8.assign(pnl=np.where(df_ch8.right == 'C',
+                                        (df_ch8.strike - df_ch8.avgCost) *
+                                        df_ch8.lot + df_ch8.revenue,
+                                        (df_ch8.avgCost - df_ch8.strike) * df_ch8.lot + df_ch8.revenue))
+
+    df_raw_covers = df_ch8  # The entire set
+
+    # Choose the contracts giving the greatest profit
+    df_covers = df_raw_covers[df_raw_covers.pnl == df_raw_covers.groupby(
+        'symbol').pnl.transform(max)].reset_index(drop=True)
 
     # ... report missing underlying symbols
     missing_und_symbols = [
@@ -185,15 +190,22 @@ def get_covers(MARKET: str = 'SNP',
             f'\nNote: {missing_und_symbols} options could not be qualified for cover...\n')
 
     # ...pickle
-    df_covers.to_pickle(DATAPATH.joinpath('df_covers.pkl'))
+    saveObject = {'df_covers': df_covers, 'df_raw_covers': df_raw_covers, 'missing': missing_und_symbols}
+
+    with open(DATAPATH.joinpath('df_covers.pkl'), 'wb') as f:
+        pickle.dump(saveObject, f)
 
     if SAVEXL:
         writer = pd.ExcelWriter(DATAPATH.joinpath(
             'propose_covers.xlsx'))
         df_covers.to_excel(writer, sheet_name='Covers', float_format='%.2f',
                            index=False, freeze_panes=(1, 1))
-        sht = writer.sheets['Covers']
-        sht.set_column('A:B', None, None, {"hidden": True})
+        df_raw_covers.to_excel(writer, sheet_name='Alternatives', float_format='%.2f',
+                               index=False, freeze_panes=(1, 1))
+        sht1 = writer.sheets['Covers']
+        sht2 = writer.sheets['Alternatives']
+        sht1.set_column('A:B', None, None, {"hidden": True})
+        sht2.set_column('A:B', None, None, {"hidden": True})
         writer.save()
 
     covers_time.stop()
@@ -202,5 +214,5 @@ def get_covers(MARKET: str = 'SNP',
 
 
 if __name__ == "__main__":
-    y = get_covers(COVERSD=1.4, SAVEXL=True)
+    y = get_covers(COVERSD=1.4, SAVEXL=True, COV_DEPTH=4)
     print(f"\nExpected pnl is: {y.pnl.sum()}\n")
