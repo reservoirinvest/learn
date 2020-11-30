@@ -84,5 +84,6 @@ SNP:
   MAXOPTQTY_SYM: 5 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
 
   COVERSD: 1.4 # For covered calls and puts
+  ORPHSD_CUTOFF: 1.4 # Cut-off to dispose orphans (old_sdMult)
   DEFEND_DTE: 30*6 # Min days for fresh protection / roll (e.g. 30 days x 6 months)
   DEFEND_TH: 0.2 # Protection threshold. Underlying should be protected against 20% fall
