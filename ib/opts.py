@@ -31,7 +31,7 @@ RUN_BASE = False  # Initialize
 
 if RUN_ALL:
 
-    RUN_BASE = RUN_QUALIFY = RUN_PRICE = RUN_MARGIN = ASSEMBLE_OPTS = True
+    RUN_BASE = RUN_QUALIFY = RUN_PRICE = RUN_MARGIN = FINAL_OPTS = True
 
     RUN_ON_PAPER = yes_or_no(f"\n Build all base on paper for {MARKET}? ")
     REUSE = yes_or_no(f"\n Reuse qualify, price and margin for {MARKET}? ")
@@ -45,17 +45,19 @@ else:
     if RUN_QUALIFY:
         if RUN_PRICE:
             msg = 'qualify and price'
-        if RUN_MARGIN:
+        elif RUN_MARGIN:
             msg = 'qualify and margin'
-        if RUN_PRICE & RUN_MARGIN:
+        elif RUN_PRICE & RUN_MARGIN:
             msg = 'qualify, price and margin'
+        else:
+            msg = 'qualify'
     else:
         msg = 'price' if RUN_PRICE else 'margin'
 
     if RUN_QUALIFY | RUN_PRICE | RUN_MARGIN:
         REUSE = yes_or_no(f"\n Reuse {msg} for {MARKET}? ")
 
-    ASSEMBLE_OPTS = yes_or_no(f"\n Assemble final df_opts for {MARKET}? ")
+    FINAL_OPTS = yes_or_no(f"\n Assemble final df_opts for {MARKET}? ")
 
     if RUN_QUALIFY:
         RUN_ON_PAPER = yes_or_no(
@@ -85,7 +87,8 @@ if RUN_BASE:
 
 if RUN_QUALIFY:
     qualify_opts(MARKET=MARKET, BLK_SIZE=200, RUN_ON_PAPER=RUN_ON_PAPER,
-                 CHECKPOINT=True, OP_FILENAME="qopts.pkl")
+                 USE_YAML_DTE=True, CHECKPOINT=True,
+                 REUSE=REUSE, OP_FILENAME="qopts.pkl")
 
 if RUN_PRICE:
     opt_prices(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER,
@@ -94,7 +97,7 @@ if RUN_PRICE:
 if RUN_MARGIN:
     opt_margins(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER,
                 REUSE=REUSE, OP_FILENAME='df_opt_margins.pkl')
-if ASSEMBLE_OPTS:
+if FINAL_OPTS:
     get_opts(MARKET=MARKET, OP_FILENAME='df_opts.pkl')
 
 all_time.stop()

@@ -209,7 +209,7 @@ async def price(ib: IB, co, **kwargs) -> pd.DataFrame:
 
     except (TypeError, AttributeError, ValueError) as err:
         print(f"\nError: contract {co} supplied is incorrect!" + f"\n{err}" +
-              f"\n... and empty df will be returned !!!")
+              f"\n... and empty df will be returned !!")
 
         df = df_empty
 
@@ -1108,12 +1108,17 @@ def get_prices(cts: Union[set, list, pd.Series],
 def qualify_opts(MARKET: str,
                  BLK_SIZE: int = 200,
                  RUN_ON_PAPER: bool = True,
+                 REUSE: bool = True,
                  CHECKPOINT: bool = True,
                  USE_YAML_DTE: bool = True,
                  OP_FILENAME: str = "qopts.pkl") -> set:
 
-    if CHECKPOINT:
-        REJECT_FILE = OP_FILENAME[:4] + '_rejects.pkl'
+    # ... start the timer
+    opts_time = Timer("qualify options")
+    opts_time.start()
+
+    REJECT_FILE = OP_FILENAME[:4] + '_rejects.pkl'
+    WIP_FILE = OP_FILENAME[:4] + '_wip.pkl'
 
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
@@ -1138,112 +1143,99 @@ def qualify_opts(MARKET: str,
     df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
 
     if USE_YAML_DTE:
-        df_chains = df_chains[df_chains.dte.between(ibp.MINDTE,
-                                                    ibp.MAXDTE,
-                                                    inclusive=True)]\
-            .reset_index(drop=True)
+        df_ch_a = pd.concat(
+            (df_chains.assign(right="P"), df_chains.assign(right="C")),
+            ignore_index=True)
 
-    df_ch = pd.concat(
-        (df_chains.assign(right="P"), df_chains.assign(right="C")),
-        ignore_index=True)
+        # ... remove expired options
+        df_ch_a = df_ch_a[df_ch_a.dte > 0].reset_index(drop=True)
 
-    # ... build the options
-    cts = [
-        Option(s, e, k, r, x) for s, e, k, r, x in zip(
-            df_ch.symbol,
-            df_ch.expiry,
-            df_ch.strike,
-            df_ch.right,
-            ["NSE" if MARKET.upper() == "NSE" else "SMART"] * len(df_ch),
-        )
-    ]
+        # ... options between min and max dte
+        df_ch_b = df_ch_a[df_ch_a.dte.between(
+            ibp.MINDTE, ibp.MAXDTE, inclusive=True)]
 
-    # .initialize
-    qopts = pd.Series([], dtype=object)  # for successful options
-    qropts = pd.Series([], dtype=object)  # for rejected options
+        # ... options at a dte beyond 6 months for SNP defends
+        if MARKET == 'SNP':
+            defend_dte_dict = df_ch_a[df_ch_a.dte > eval(ibp.DEFEND_DTE)]\
+                .groupby('symbol').dte\
+                .apply(min).to_dict()
 
-    if CHECKPOINT:  # re-use qopts file if available
+            df_ch_c = df_ch_a[df_ch_a.dte ==
+                              df_ch_a.symbol.map(defend_dte_dict)]
 
-        cols = ['symbol', 'expiry', 'strike', 'right']
+            # ... consolidate
+            df_ch = pd.concat([df_ch_b, df_ch_c], ignore_index=True)
 
-        try:
-            qopts = pd.read_pickle(DATAPATH.joinpath(OP_FILENAME))
+        else:
+            df_ch = df_ch_b
 
-            # remove duplicates in qopts
-            # for quick manipulation of drop_duplicates!!
-            temp_df = util.df(qopts.to_list())\
-                .assign(contract=qopts)\
-                .rename(columns={"lastTradeDateOrContractMonth": "expiry"})\
-                .drop_duplicates(subset=cols)\
-                .drop('conId', 1)\
-                .reset_index()
+    # * CLEAN UP THE OPTION CHAIN
 
-            qopts = temp_df.contract
+    cols = ['symbol', 'expiry', 'strike', 'right']
 
-            all_df = util.df(cts)\
-                .iloc[:, :6]\
+    try:
+        qopts = pd.read_pickle(DATAPATH.joinpath(OP_FILENAME))
+    except FileNotFoundError:
+        # for existing successful options
+        qopts = pd.Series([], dtype=object, name='qualified')
+
+    try:
+        qropts = pd.read_pickle(DATAPATH.joinpath(REJECT_FILE))
+    except FileNotFoundError:
+        # for rejected options
+        qropts = pd.Series([], dtype=object, name='rejected')
+
+    try:
+        wips = pd.read_pickle(DATAPATH.joinpath(WIP_FILE))
+    except FileNotFoundError:
+        wips = pd.Series([], dtype=object, name='wip')
+
+    existing_opts = pd.concat([qopts, qropts, wips], ignore_index=True)
+
+    if REUSE:  # remove existing options
+
+        if not existing_opts.empty:  # something is existing!
+
+            df_existing = util.df(existing_opts.to_list()).iloc[:, :6]\
                 .rename(columns={"lastTradeDateOrContractMonth": "expiry"})\
                 .drop("conId", 1)
 
-            # handling unqualified reject files
-            try:
-                qropts = pd.read_pickle(DATAPATH.joinpath(REJECT_FILE))
+            # remove existing options from df_ch
+            df_ch = pd.concat([df_ch[cols],
+                               df_existing[cols]], ignore_index=True)\
+                .drop_duplicates(keep=False).reset_index(drop=True)
 
-                # remove duplicates in reject df
-                reject_df = util.df(qropts.to_list())\
-                    .assign(contract=qropts)\
-                    .rename(columns={"lastTradeDateOrContractMonth": "expiry"})\
-                    .drop_duplicates(subset=cols)\
-                    .drop('conId', 1)\
-                    .reset_index()
-
-                qropts = reject_df.contract
-
-            except FileNotFoundError:
-                reject_df = pd.DataFrame([])
-                pass
-
-            # rebuild cts
-            df_ch1 = pd.concat([all_df, temp_df]).drop_duplicates(subset=cols,
-                                                                  keep=False)
-            df_ch2 = pd.concat([df_ch1,
-                                reject_df]).drop_duplicates(subset=cols,
-                                                            keep=False)
-            cts = [
-                Option(s, e, k, r, x) for s, e, k, r, x in zip(
-                    df_ch2.symbol,
-                    df_ch2.expiry,
-                    df_ch2.strike,
-                    df_ch2.right,
-                    ["NSE" if MARKET.upper() == "NSE" else "SMART"] *
-                    len(df_ch2),
-                )
-            ]
-
-        except FileNotFoundError as fe:
-            print(
-                f"\n{OP_FILENAME} checkpoint (or) {REJECT_FILE} reject file is not available."
-                + f"\n Error: {fe}. \nAll options will be qualified.\n")
-
-    # ... start the timer
-    opts_time = Timer("qualify options")
-    opts_time.start()
+    # * BUILD THE OPTIONS TO BE QUALIFIED
+    cts = [Option(s, e, k, r, x) for s, e, k, r, x in zip(
+        df_ch.symbol,
+        df_ch.expiry,
+        df_ch.strike,
+        df_ch.right,
+        ["NSE" if MARKET.upper() == "NSE" else "SMART"] * len(df_ch),)
+    ]
 
     # ..build the raw blocks from cts
     raw_blks = [cts[i:i + BLK_SIZE] for i in range(0, len(cts), BLK_SIZE)]
 
     with IB().connect(HOST, PORT, CID) as ib:
-        for b in tqdm(
-                raw_blks,
-                desc=f"{MARKET} opts qual:",
-                bar_format=BAR_FORMAT, ncols=80
-        ):
 
-            # Success
-            qs = ib.qualifyContracts(*b)
+        for b in tqdm(raw_blks,
+                      desc=f"{MARKET} opts qual:",
+                      bar_format=BAR_FORMAT, ncols=80):
+
+            qs = ib.run(executeAsync(
+                ib=ib,
+                algo=qualify,
+                cts=b,
+                CONCURRENT=200,
+                TIMEOUT=5,
+                post_process=save_df,
+                SHOW_TQDM=False,
+            ))
+
+            # Successes
             qopts = qopts.append(pd.Series(qs, dtype=object, name='qualified'),
                                  ignore_index=True)
-            qopts.to_pickle(DATAPATH.joinpath(OP_FILENAME))
 
             # Rejects
             rejects = [c for c in b if not c.conId]
@@ -1251,11 +1243,23 @@ def qualify_opts(MARKET: str,
                                              dtype=object,
                                              name='rejected'),
                                    ignore_index=True)
-            qropts.to_pickle(DATAPATH.joinpath(REJECT_FILE))
 
-    # to prevent TimeoutError()
-    ib.disconnect()
-    IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
+            if CHECKPOINT:  # store the intermediate options while qualifying
+                qopts.to_pickle(DATAPATH.joinpath(WIP_FILE))
+                qropts.to_pickle(DATAPATH.joinpath(REJECT_FILE))
+
+        # to prevent TimeoutError()
+        ib.disconnect()
+        IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
+
+    if CHECKPOINT:
+        # ... write final options and cleanup WIP
+        qopts.to_pickle(DATAPATH.joinpath(OP_FILENAME))
+
+        try:
+            os.remove(DATAPATH.joinpath(WIP_FILE))
+        except FileNotFoundError:
+            pass
 
     opts_time.stop()
 
@@ -1652,21 +1656,26 @@ def get_opts(
     return df_opts
 
 
-# !!! TEMPORARY TO CHECK get_unds
+# !!! TEMPORARY TO CHECK qualify
 if __name__ == "__main__":
 
     MARKET = 'SNP'
 
-    ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
+    """ ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
     dfrq = pd.read_pickle(DATAPATH.joinpath('dfrq.pkl'))
     df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
 
-    cts = df_symlots.contract.to_list()
+    cts = df_symlots.contract.to_list() """
 
-    x = get_unds(MARKET=MARKET, und_cts=cts,
-                 savedf=True, RUN_ON_PAPER=False)
+    x = qualify_opts(MARKET=MARKET,
+                     BLK_SIZE=200,
+                     RUN_ON_PAPER=True,
+                     REUSE=True,
+                     CHECKPOINT=True,
+                     USE_YAML_DTE=True,
+                     OP_FILENAME='qopts.pkl')
 
-    print(x.head())
+    print(x)

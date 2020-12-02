@@ -13,11 +13,11 @@ from engine import get_chains, get_margins, get_prices, get_unds, qualify
 from support import Timer, Vars, calcsdmult_df, get_prec, quick_pf
 
 
-def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
-    
+def get_defends(MARKET: str = 'SNP', SAVEXL: bool = True):
+
     defends_time = Timer(f"{MARKET} defends time")
     defends_time.start()
-    
+
     # * SETUP
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
 
@@ -35,9 +35,6 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
 
     # ... file loads
     df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
-    df_unds = pd.read_pickle(DATAPATH.joinpath('df_unds.pkl'))
-    df_chains = pd.read_pickle(DATAPATH.joinpath('df_chains.pkl'))
-    dfrq = pd.read_pickle(DATAPATH.joinpath('dfrq.pkl'))
 
     # * GET THE UNDEFENDED STOCKS FROM DFRQ
     dfrq = get_dfrq(MARKET)
@@ -47,26 +44,29 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
         df_pf = quick_pf(ib)
 
     undef = dfrq[dfrq.status.isin(['dodo', 'undefended'])].symbol.unique()
-    undef_cts = set(df_symlots[df_symlots.symbol.isin(undef)].contract.unique())
+    undef_cts = set(
+        df_symlots[df_symlots.symbol.isin(undef)].contract.unique())
 
-    df_ch = get_chains(MARKET=MARKET, und_cts=undef_cts, savedf=False, RUN_ON_PAPER=False)
-    df_u = get_unds(MARKET=MARKET, und_cts=undef_cts, savedf=False, RUN_ON_PAPER=False)
+    df_ch = get_chains(MARKET=MARKET, und_cts=undef_cts,
+                       savedf=False, RUN_ON_PAPER=False)
+    df_u = get_unds(MARKET=MARKET, und_cts=undef_cts,
+                    savedf=False, RUN_ON_PAPER=False)
 
     # * BUILD CHAINS
 
     # ... filter chains more than 6 months away
-    df_ch1 = df_ch[df_ch.dte>eval(ibp.DEFEND_DTE)]
+    df_ch1 = df_ch[df_ch.dte > eval(ibp.DEFEND_DTE)]
     df_ch2 = df_ch1[df_ch1.dte == df_ch1.groupby('symbol').dte.transform(min)]
 
     # ... integrate iv
     df_ch2 = df_ch2.set_index('symbol')\
-    .join(df_u[['symbol', 'undPrice', 'iv']]\
-        .set_index('symbol')).rename(columns={'iv': 'und_iv'})
+        .join(df_u[['symbol', 'undPrice', 'iv']]
+              .set_index('symbol')).rename(columns={'iv': 'und_iv'})
 
     # ... integrate portfolio
     m = (df_pf.secType == 'STK') & (df_pf.symbol.isin(undef))
-    df_ch3 = df_ch2.join(df_pf[m][['symbol', 'position', 'avgCost']]\
-                .set_index('symbol')).reset_index()
+    df_ch3 = df_ch2.join(df_pf[m][['symbol', 'position', 'avgCost']]
+                         .set_index('symbol')).reset_index()
 
     # For positions < 0, we need defensive calls. For positions > 0 we need defensive puts.
     df_defends = df_ch3.assign(right=np.where(df_ch3.position > 0, 'P', 'C'))
@@ -74,13 +74,13 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
     # Filter out defend options whose strikes are beyond the defense threshold
     # ... make strike delta
     df_defends = df_defends.assign(strkDelta=df_defends.undPrice * df_defends.und_iv * (df_defends.dte / 365).
-                                apply(math.sqrt))
+                                   apply(math.sqrt))
 
     # ... get the strike reference based the threshold
 
     strikeRef = np.where(df_defends.right == 'C',
-                df_defends.undPrice + ibp.DEFEND_TH * df_defends.strkDelta,
-                df_defends.undPrice - ibp.DEFEND_TH * df_defends.strkDelta)
+                         df_defends.undPrice + ibp.DEFEND_TH * df_defends.strkDelta,
+                         df_defends.undPrice - ibp.DEFEND_TH * df_defends.strkDelta)
 
     df_defends = df_defends.assign(strikeRef=strikeRef).\
         reset_index(drop=True)
@@ -95,35 +95,36 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
     df_defends = df_defends.assign(action='BUY')
 
     # ... make the quantity
-    df_defends = df_defends.assign(qty = (df_defends.position/df_defends.lot)\
-                        .apply(abs))
+    df_defends = df_defends.assign(qty=(df_defends.position / df_defends.lot)
+                                   .apply(abs))
 
     # * GET THE CONTRACTS
 
     # ... build the contracts
     optcon_raw = [Option(s, e, k, r, 'SMART')
-                for s, e, k, r
-                in zip(df_defends.symbol, df_defends.expiry,
-                        df_defends.strike, df_defends.right)]
+                  for s, e, k, r
+                  in zip(df_defends.symbol, df_defends.expiry,
+                         df_defends.strike, df_defends.right)]
 
     with IB().connect(HOST, PORT, CID) as ib:
         dfoc = ib.run(qualify(ib, optcon_raw))
-        
+
     dfoc = util.df(dfoc.to_list()).iloc[:, :6]\
-                    .rename(columns={'lastTradeDateOrContractMonth': 'expiry'})\
-                    .assign(contract=dfoc).dropna()\
-                    .reset_index(drop=True)
+        .rename(columns={'lastTradeDateOrContractMonth': 'expiry'})\
+        .assign(contract=dfoc).dropna()\
+        .reset_index(drop=True)
 
     # ... integrate with the chains
     cols = ['symbol', 'strike', 'expiry', 'right']
-    df_ch6 = df_defends.set_index(cols).join(dfoc[cols+['conId', 'contract']]\
-                    .set_index(cols)).dropna().reset_index()
+    df_ch6 = df_defends.set_index(cols).join(dfoc[cols + ['conId', 'contract']]
+                                             .set_index(cols)).dropna().reset_index()
 
     # ... get the prices
     dfop = get_prices(MARKET=MARKET, cts=df_ch6.contract, FILL_DELAY=8)
 
     # ... get margins
-    orders = [MarketOrder(action, qty) for action, qty in zip(df_ch6.action, df_ch6.qty)]
+    orders = [MarketOrder(action, qty)
+              for action, qty in zip(df_ch6.action, df_ch6.qty)]
 
     cos = list(zip(df_ch6.contract, orders))
 
@@ -131,11 +132,11 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
 
     # ... integrate price and margins
     df_ch7 = df_ch6.set_index('conId')\
-            .join(dfop[['conId', 'bid', 'ask', 'close', 'price', 'iv']]\
-            .set_index('conId'))\
-            .join(dfom[['conId', 'margin', 'comm']]\
-            .set_index('conId'))\
-            .reset_index()
+        .join(dfop[['conId', 'bid', 'ask', 'close', 'price', 'iv']]
+              .set_index('conId'))\
+        .join(dfom[['conId', 'margin', 'comm']]
+              .set_index('conId'))\
+        .reset_index()
 
     # * SELECT THE DEFENSES
 
@@ -147,7 +148,7 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
 
     # .. set the expected price
     df_ch8['expPrice'] = (df_ch8.price - 3 *
-                        ibp.PREC).apply(lambda x: get_prec(x, ibp.PREC))
+                          ibp.PREC).apply(lambda x: get_prec(x, ibp.PREC))
     df_ch8 = df_ch8.assign(sdmult=calcsdmult_df(df_ch8.strike, df_ch8))
 
     # ... make the action as 'BUY'
@@ -155,24 +156,26 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
 
     # ... stage the columns
     cols = ['conId', 'contract', 'symbol', 'right', 'strike', 'avgCost',
-            'undPrice', 'expiry', 'dte', 'iv', 'sdmult',  'lot', 'margin', 
+            'undPrice', 'expiry', 'dte', 'iv', 'sdmult', 'lot', 'margin',
             'action', 'qty', 'price', 'expPrice']
     df_ch8 = df_ch8[cols]
 
-    df_ch8['def_pct'] = np.where(df_ch8.right == 'C', \
-                                (df_ch8.strike-df_ch8.undPrice)/df_ch8.undPrice, \
-                                (df_ch8.undPrice-df_ch8.strike)/df_ch8.undPrice)
+    df_ch8['def_pct'] = np.where(df_ch8.right == 'C',
+                                 (df_ch8.strike - df_ch8.undPrice) /
+                                 df_ch8.undPrice,
+                                 (df_ch8.undPrice - df_ch8.strike) / df_ch8.undPrice)
 
-    df_ch8['defense'] = df_ch8.def_pct*df_ch8.undPrice * df_ch8.lot * df_ch8.qty
+    df_ch8['defense'] = df_ch8.def_pct * \
+        df_ch8.undPrice * df_ch8.lot * df_ch8.qty
 
     df_ch8 = df_ch8.assign(
         cost=df_ch8.expPrice * df_ch8.lot * df_ch8.qty)
 
-    df_raw_defends = df_ch8 # The entire set for alternatives
-
+    df_raw_defends = df_ch8  # The entire set for alternatives
 
     # * CHOOSE DEFENSE WITH THE LOWEST COST
-    df_defends = df_ch8[df_ch8.cost == df_ch8.groupby('symbol').cost.transform(min)]
+    df_defends = df_ch8[df_ch8.cost ==
+                        df_ch8.groupby('symbol').cost.transform(min)]
 
     # ... report missing underlying symbols
     missing_und_symbols = [
@@ -183,7 +186,8 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
             f'\nNote: {missing_und_symbols} options could not be defended...\n')
 
     # ... pickle and save to Excel
-    saveObject = {'df_defends': df_defends, 'df_raw_defends': df_raw_defends, 'missing': missing_und_symbols}
+    saveObject = {'df_defends': df_defends,
+                  'df_raw_defends': df_raw_defends, 'missing': missing_und_symbols}
 
     with open(DATAPATH.joinpath('df_defends.pkl'), 'wb') as f:
         pickle.dump(saveObject, f)
@@ -192,18 +196,19 @@ def get_defends(MARKET: str='SNP', SAVEXL: bool=True):
         writer = pd.ExcelWriter(DATAPATH.joinpath(
             'propose_defends.xlsx'))
         df_defends.to_excel(writer, sheet_name='Defends', float_format='%.2f',
-                        index=False, freeze_panes=(1, 1))
-        df_raw_defends.to_excel(writer, sheet_name='Alternatives', float_format='%.2f',
                             index=False, freeze_panes=(1, 1))
+        df_raw_defends.to_excel(writer, sheet_name='Alternatives', float_format='%.2f',
+                                index=False, freeze_panes=(1, 1))
         sht1 = writer.sheets['Defends']
         sht2 = writer.sheets['Alternatives']
         sht1.set_column('A:B', None, None, {"hidden": True})
         sht2.set_column('A:B', None, None, {"hidden": True})
         writer.save()
-        
+
     defends_time.stop()
-    
+
     return df_defends
+
 
 if __name__ == "__main__":
     get_defends()

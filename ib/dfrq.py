@@ -119,13 +119,14 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     lotmap = df_symlots[["symbol", "lot"]].set_index(
         "symbol").to_dict("dict")["lot"]
     s_gross = df_unds.close * df_unds.symbol.map(lotmap)
+
+    # * BUILD dfrq
     dfrq = (
         df_unds.assign(lot=df_unds.symbol.map(lotmap), gross=s_gross)
         .sort_values("gross", ascending=False)[["symbol", "undPrice", "lot", "gross"]]
         .reset_index(drop=True)
     )
 
-    # * BUILD dfrq
     # .integrate grosspos into dfrq
     dfrq = dfrq.assign(grosspos=dfrq.symbol.map(df_gp).apply(abs)).sort_values(
         "grosspos", ascending=False
@@ -164,9 +165,16 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     naked = sorted(df_naked.symbol.unique())
 
     # Orphan: long calls and long puts not in `naked` and whithout underlying stocks
+
+    # ... already balanced positions to be removed from orphans
+    df_balanced_opts = df_opt[df_opt.groupby('symbol')
+                                    .position
+                                    .transform(sum) == 0]
+
     m_orphan = (
         (df_opt.position > 0)
         & ~df_opt.symbol.isin(naked)
+        & ~df_opt.symbol.isin(df_balanced_opts.symbol.unique())
         & ~df_opt.symbol.isin(df_stk.symbol.unique())
     )
 
@@ -200,16 +208,20 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     dodo = [s for s in uncovered if s in undefended]
 
     # balanced: stock symbols that are both covered and protected
-    balanced = [s for s in already_covered if s in already_defended]
+    balanced = set(s for s in already_covered if s in already_defended)
+
+    # add the already balanced orphan options
+    balanced = list(balanced | set(df_balanced_opts.symbol.unique()))
+
+    covered = list(set(dodo) | set(balanced))
 
     # remove dodos and balanced from uncovered and undefended
-    uncovered = [s for s in uncovered if s not in set(dodo + balanced)]
-    undefended = [s for s in undefended if s not in set(dodo + balanced)]
+    uncovered = [s for s in uncovered if s not in covered]
+    undefended = [s for s in undefended if s not in covered]
 
     # harvest: symbols not in all other statuses
-    harvest = set(dfrq.symbol) - set(
-        orphan + uncovered + undefended + dodo + partials + naked + balanced
-    )
+    harvest = set(dfrq.symbol) - set(orphan + uncovered + undefended +
+                                     dodo + partials + naked + balanced)
 
     # map the status to dfrq symbols
 

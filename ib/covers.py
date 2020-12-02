@@ -40,7 +40,6 @@ def get_covers(MARKET: str = 'SNP',  # currently valid only for SNP!
 
     # ... file loads
     df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
-    dfrq = pd.read_pickle(DATAPATH.joinpath('dfrq.pkl'))
 
     # * GET STOCKS NOT COVERED FROM DFRQ
     dfrq = get_dfrq(MARKET)
@@ -190,7 +189,8 @@ def get_covers(MARKET: str = 'SNP',  # currently valid only for SNP!
             f'\nNote: {missing_und_symbols} options could not be qualified for cover...\n')
 
     # ...pickle
-    saveObject = {'df_covers': df_covers, 'df_raw_covers': df_raw_covers, 'missing': missing_und_symbols}
+    saveObject = {'df_covers': df_covers,
+                  'df_raw_covers': df_raw_covers, 'missing': missing_und_symbols}
 
     with open(DATAPATH.joinpath('df_covers.pkl'), 'wb') as f:
         pickle.dump(saveObject, f)

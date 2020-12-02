@@ -288,11 +288,16 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     writer = pd.ExcelWriter(DATAPATH.joinpath(
         "df_nakeds.xlsx"), engine="xlsxwriter")
 
-    df_nakeds2.to_excel(
+    cols = ['conId', 'symbol', 'expiry', 'strike', 'secType', 'dte', 'right',
+            'contract', 'und_iv', 'undPrice', 'hi_sd', 'lo_sd', 'lot', 'comm',
+            'margin', 'bid', 'ask', 'close', 'last', 'sdMult', 'iv', 'qty',
+            'intrinsic', 'timevalue', 'rom', 'expRom', 'price', 'expPrice']
+
+    df_nakeds2[cols].to_excel(
         writer, sheet_name="All", float_format="%.2f", index=False, freeze_panes=(1, 1)
     )
 
-    df_calls.to_excel(
+    df_calls[cols].to_excel(
         writer,
         sheet_name="Calls",
         float_format="%.2f",
@@ -300,7 +305,7 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
         freeze_panes=(1, 1),
     )
 
-    df_puts.to_excel(
+    df_puts[cols].to_excel(
         writer, sheet_name="Puts", float_format="%.2f", index=False, freeze_panes=(1, 1)
     )
 
