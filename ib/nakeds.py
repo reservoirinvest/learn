@@ -11,7 +11,7 @@ import pandas as pd
 from ib_insync import IB, MarketOrder, util
 
 from dfrq import get_dfrq
-from engine import executeAsync, get_unds, margin, price, save_df
+from engine import executeAsync, get_unds, margin, price, post_df
 from support import (Timer, Vars, calcsdmult_df, get_dte, get_market, get_prec,
                      yes_or_no)
 
@@ -44,7 +44,7 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
     und_cts = df_symlots.contract.unique()
 
     if RECALC_UNDS:
-        df_unds = get_unds(MARKET, und_cts, savedf=True)
+        df_unds = get_unds(MARKET, und_cts, SAVE=True)
     else:
         df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
 
@@ -171,7 +171,7 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
                 cts=nakeds_contracts,
                 CONCURRENT=40,
                 TIMEOUT=8,
-                post_process=save_df,
+                post_process=post_df,
                 DATAPATH=DATAPATH,
                 **{"FILL_DELAY": 5.5},
                 OP_FILENAME="",
@@ -198,7 +198,7 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
                 cts=opt_cos,
                 CONCURRENT=200,
                 TIMEOUT=5.5,
-                post_process=save_df,
+                post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME="",
                 SHOW_TQDM=True,
@@ -289,9 +289,9 @@ def get_nakeds(MARKET: str, RECALC_UNDS: bool = True) -> pd.DataFrame:
         "df_nakeds.xlsx"), engine="xlsxwriter")
 
     cols = ['conId', 'symbol', 'expiry', 'strike', 'secType', 'dte', 'right',
-            'contract', 'und_iv', 'undPrice', 'hi_sd', 'lo_sd', 'lot', 'comm',
-            'margin', 'bid', 'ask', 'close', 'last', 'sdMult', 'iv', 'qty',
-            'intrinsic', 'timevalue', 'rom', 'expRom', 'price', 'expPrice']
+            'contract', 'und_iv', 'undPrice', 'hi_sd', 'lo_sd', 'lot', 'iv', 'qty', 'comm',
+            'margin', 'bid', 'ask', 'close', 'last', 'sdMult',
+            'intrinsic', 'timevalue', 'price', 'expPrice', 'rom', 'expRom']
 
     df_nakeds2[cols].to_excel(
         writer, sheet_name="All", float_format="%.2f", index=False, freeze_panes=(1, 1)

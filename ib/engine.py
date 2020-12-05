@@ -14,7 +14,7 @@ import requests
 from ib_insync import IB, Contract, MarketOrder, Option, util
 from tqdm import tqdm
 
-from support import (Timer, Vars, calcsdmult_df, get_dte, get_market, quick_pf,
+from support import (Timer, Vars, calcsdmult_df, get_dte, get_prob, quick_pf,
                      yes_or_no)
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
@@ -539,7 +539,7 @@ async def executeAsync(
 
 
 # .Process output into dataframes
-def save_df(results: set, DATAPATH: pathlib.Path, REUSE: bool,
+def post_df(results: set, DATAPATH: pathlib.Path, REUSE: bool,
             LAST_RUN: bool, OP_FILENAME: str = "") -> pd.DataFrame():
 
     if results:
@@ -805,7 +805,7 @@ def get_symlots(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
                 cts=raw_unds,
                 CONCURRENT=100,
                 TIMEOUT=5,
-                post_process=save_df,
+                post_process=post_df,
             ))
 
         # to prevent first TimeoutError()
@@ -834,7 +834,7 @@ def get_symlots(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 # .. generate ohlcs for symlots
 def get_ohlcs(MARKET: str,
               und_cts: list,
-              savedf: bool,
+              SAVE: bool,
               RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
     ohlc_time = Timer(MARKET.lower() + "_ohlcs")
@@ -851,7 +851,7 @@ def get_ohlcs(MARKET: str,
 
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
-    if savedf:
+    if SAVE:
         OP_FILENAME = "df_ohlcs.pkl"
     else:
         OP_FILENAME = ""
@@ -864,7 +864,7 @@ def get_ohlcs(MARKET: str,
                 cts=und_cts,
                 CONCURRENT=20,
                 TIMEOUT=18,
-                post_process=save_df,
+                post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME=OP_FILENAME,
                 **{
@@ -880,7 +880,7 @@ def get_ohlcs(MARKET: str,
 # .. generate underlyings df from symlots
 def get_unds(MARKET: str,
              und_cts: list,
-             savedf: bool = False,
+             SAVE: bool = False,
              RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
     und_time = Timer(MARKET.lower() + " underlyings")
@@ -902,7 +902,10 @@ def get_unds(MARKET: str,
     df_symlots = df_symlots[df_symlots.symbol.isin(
         [c.symbol for c in und_cts])].reset_index(drop=True)
 
-    if savedf:
+    # remove duplicate symbols in df_symlots (duplicates due to NSE lot changes)
+    df_symlots = df_symlots.drop_duplicates(['symbol']).reset_index(drop=True)
+
+    if SAVE:
         OP_FILENAME = "df_unds.pkl"
     else:
         OP_FILENAME = ""
@@ -915,7 +918,7 @@ def get_unds(MARKET: str,
                 cts=und_cts,
                 CONCURRENT=40,
                 TIMEOUT=8,
-                post_process=save_df,
+                post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME="",
                 **{"FILL_DELAY": 8},
@@ -939,7 +942,7 @@ def get_unds(MARKET: str,
                 cts=und_cos,
                 CONCURRENT=200,
                 TIMEOUT=5.5,
-                post_process=save_df,
+                post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME="",
                 **{"FILL_DELAY": 5.5},
@@ -961,7 +964,7 @@ def get_unds(MARKET: str,
 # .. get chains from symlots
 def get_chains(MARKET: str,
                und_cts: list,
-               savedf: bool,
+               SAVE: bool,
                RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
     chain_time = Timer(MARKET.lower() + "_chains")
@@ -983,7 +986,7 @@ def get_chains(MARKET: str,
     df_symlots = df_symlots[df_symlots.symbol.isin(
         [c.symbol for c in und_cts])].reset_index(drop=True)
 
-    if savedf:
+    if SAVE:
         OP_FILENAME = "df_chains.pkl"
     else:
         OP_FILENAME = ""
@@ -996,7 +999,7 @@ def get_chains(MARKET: str,
                 cts=und_cts,
                 CONCURRENT=44,
                 TIMEOUT=5,
-                post_process=save_df,
+                post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME=OP_FILENAME,
             ))
@@ -1018,7 +1021,7 @@ def get_chains(MARKET: str,
     df_chains = df_chains.dropna().reset_index(drop=True)
 
     # ...write back to pickle
-    if savedf:
+    if SAVE:
         df_chains.to_pickle(DATAPATH.joinpath(OP_FILENAME))
 
     chain_time.stop()
@@ -1059,7 +1062,7 @@ def get_margins(MARKET: str,
                 cts=cos,
                 CONCURRENT=CONCURRENT,
                 TIMEOUT=TIMEOUT,
-                post_process=save_df,
+                post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME=OP_FILENAME,
                 **{"FILL_DELAY": FILL_DELAY},
@@ -1093,7 +1096,7 @@ def get_prices(cts: Union[set, list, pd.Series],
                 cts=cts,
                 CONCURRENT=40,
                 TIMEOUT=8,
-                post_process=save_df,
+                post_process=post_df,
                 **{
                     "FILL_DELAY": FILL_DELAY
                 },
@@ -1181,6 +1184,19 @@ def qualify_opts(MARKET: str,
 
     try:
         qropts = pd.read_pickle(DATAPATH.joinpath(REJECT_FILE))
+
+        # Clean rejects
+        # ... build df_rejects
+        df_rejects = util.df(qropts.to_list()).iloc[:, :6]\
+            .rename(columns={"lastTradeDateOrContractMonth": "expiry"})\
+            .drop(['conId', 'secType'], 1)\
+            .assign(contract=qropts)
+
+        # ... remove df_rejects not in df_ch
+        m = df_rejects[cols].apply(tuple, 1).isin(df_ch[cols].apply(tuple, 1))
+
+        qropts = df_rejects[m].contract.rename('rejected')
+
     except FileNotFoundError:
         # for rejected options
         qropts = pd.Series([], dtype=object, name='rejected')
@@ -1229,7 +1245,7 @@ def qualify_opts(MARKET: str,
                 cts=b,
                 CONCURRENT=200,
                 TIMEOUT=5,
-                post_process=save_df,
+                post_process=post_df,
                 SHOW_TQDM=False,
             ))
 
@@ -1380,7 +1396,7 @@ def opt_prices(
                 ib=ib,
                 algo=price,
                 cts=price_contracts,
-                post_process=save_df,
+                post_process=post_df,
                 CONCURRENT=40 * 4,
                 TIMEOUT=11,
                 DATAPATH=DATAPATH,
@@ -1578,17 +1594,17 @@ def get_opts(
 
     # ... concatenate and cleanup
     df_opt_prices = pd.concat([df_opt_prices, df_opt_prices1], ignore_index=True)\
-        .dropna(subset=['price']).drop_duplicates(['conId'])\
+        .dropna(subset=['price']).drop_duplicates(['conId'], keep='last')\
         .reset_index(drop=True)
 
     df_opt_margins = pd.concat([df_opt_margins, df_opt_margins1], ignore_index=True)\
-        .dropna(subset=['margin']).drop_duplicates(['conId'])\
+        .dropna(subset=['margin']).drop_duplicates(['conId'], keep='last')\
         .reset_index(drop=True)
 
     # * BUILD DF OPTION
     df_opts = util.df(qopts.to_list()).iloc[:, :6]\
         .assign(contract=qopts)\
-        .rename(columns={"lastTradeDateOrContractMonth": "expiry"})
+        .rename(columns={"lastTradeDateOrContractMonth": "expiry"}).drop_duplicates()
 
     # ... integrate lots (from chains), und_iv  and undPrice
     col1 = ["symbol", "strike", "expiry"]
@@ -1619,8 +1635,9 @@ def get_opts(
     m_iv = df_opts.iv.isnull()
     df_opts.loc[m_iv, "iv"] = df_opts[m_iv].und_iv
 
-    # . update calculated sd mult for strike
+    # . update calculated sd mult for strike and its probability
     df_opts.insert(19, "sdMult", calcsdmult_df(df_opts.strike, df_opts))
+    df_opts.insert(19, "prob", df_opts.sdMult.apply(get_prob))
 
     # . put the order quantity
     df_opts["qty"] = 1 if MARKET == "SNP" else df_opts.lot
@@ -1647,7 +1664,10 @@ def get_opts(
         df_opts.margin * 365 / df_opts.dte)
 
     df_opts = df_opts.sort_values("rom",
-                                  ascending=False).reset_index(drop=True)
+                                  ascending=False)
+
+    # . drop duplicates
+    df_opts = df_opts.drop_duplicates(keep='last').reset_index(drop=True)
 
     df_opts.to_pickle(DATAPATH.joinpath(OP_FILENAME))
 
@@ -1656,26 +1676,11 @@ def get_opts(
     return df_opts
 
 
-# !!! TEMPORARY TO CHECK qualify
+# !!! TEMPORARY - Checking get_opts
 if __name__ == "__main__":
 
     MARKET = 'SNP'
-
-    """ ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
-
-    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
-
-    dfrq = pd.read_pickle(DATAPATH.joinpath('dfrq.pkl'))
-    df_symlots = pd.read_pickle(DATAPATH.joinpath('df_symlots.pkl'))
-
-    cts = df_symlots.contract.to_list() """
-
-    x = qualify_opts(MARKET=MARKET,
-                     BLK_SIZE=200,
-                     RUN_ON_PAPER=True,
-                     REUSE=True,
-                     CHECKPOINT=True,
-                     USE_YAML_DTE=True,
-                     OP_FILENAME='qopts.pkl')
+    
+    x = get_opts(MARKET)
 
     print(x)

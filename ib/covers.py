@@ -53,9 +53,9 @@ def get_covers(MARKET: str = 'SNP',  # currently valid only for SNP!
     uncov_cts = df_symlots[df_symlots.symbol.isin(uncov)].contract.to_list()
 
     df_ch = get_chains(MARKET=MARKET, und_cts=uncov_cts,
-                       savedf=False, RUN_ON_PAPER=False)
+                       SAVE=False, RUN_ON_PAPER=False)
     df_u = get_unds(MARKET=MARKET, und_cts=uncov_cts,
-                    savedf=False, RUN_ON_PAPER=False)
+                    SAVE=False, RUN_ON_PAPER=False)
 
     # * BUILD THE OPTION CONTRACTS
 

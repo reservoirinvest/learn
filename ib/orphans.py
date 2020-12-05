@@ -53,9 +53,9 @@ def get_orphans(MARKET: str = 'SNP',
     orph_cts = set(df_symlots[df_symlots.symbol.isin(orph)].contract.unique())
 
     df_ch = get_chains(MARKET=MARKET, und_cts=orph_cts,
-                       savedf=False, RUN_ON_PAPER=False)
+                       SAVE=False, RUN_ON_PAPER=False)
     df_u = get_unds(MARKET=MARKET, und_cts=orph_cts,
-                    savedf=False, RUN_ON_PAPER=False)
+                    SAVE=False, RUN_ON_PAPER=False)
 
     # * BUILD THE OPTION CONTRACTS
 

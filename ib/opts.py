@@ -43,16 +43,24 @@ else:
     RUN_MARGIN = yes_or_no(f"\n Run margin? ")
 
     if RUN_QUALIFY:
+
+        msg = 'qualify'
+
         if RUN_PRICE:
             msg = 'qualify and price'
         elif RUN_MARGIN:
             msg = 'qualify and margin'
         elif RUN_PRICE & RUN_MARGIN:
             msg = 'qualify, price and margin'
-        else:
-            msg = 'qualify'
     else:
-        msg = 'price' if RUN_PRICE else 'margin'
+
+        msg = 'price and margin'
+
+        if RUN_PRICE and not RUN_MARGIN:
+            msg = 'price'
+
+        if RUN_MARGIN and not RUN_PRICE:
+            msg = 'margin'
 
     if RUN_QUALIFY | RUN_PRICE | RUN_MARGIN:
         REUSE = yes_or_no(f"\n Reuse {msg} for {MARKET}? ")
@@ -77,13 +85,13 @@ if RUN_BASE:
     und_cts = df_symlots.contract.unique()
 
     get_unds(MARKET=MARKET, und_cts=und_cts,
-             RUN_ON_PAPER=RUN_ON_PAPER, savedf=True)
+             RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
 
     get_ohlcs(MARKET=MARKET, und_cts=und_cts,
-              RUN_ON_PAPER=RUN_ON_PAPER, savedf=True)
+              RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
 
     get_chains(MARKET=MARKET, und_cts=und_cts,
-               RUN_ON_PAPER=RUN_ON_PAPER, savedf=True)
+               RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
 
 if RUN_QUALIFY:
     qualify_opts(MARKET=MARKET, BLK_SIZE=200, RUN_ON_PAPER=RUN_ON_PAPER,

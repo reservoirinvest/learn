@@ -132,6 +132,27 @@ def calcsd(price, undPrice, dte, iv):
     return sdev
 
 
+def fallrise(df_hist, dte):
+    '''Gets the fall and rise for a specific dte
+
+    Args:
+        (df_hist) as a df with historical ohlc for a scrip
+        (dte) as int for days to expiry
+    Returns:
+        {dte: {'fall': fall, 'rise': rise}} as a dictionary of floats'''
+
+    s = df_hist.symbol.unique()[0]
+    df = df_hist.set_index('date').sort_index(ascending=True)
+    df = df.assign(delta=df.high.rolling(dte).max() - df.low.rolling(dte).min(),
+                   pctchange=df.close.pct_change(periods=dte))
+
+    df1 = df.sort_index(ascending=False)
+    max_fall = df1[df1.pctchange <= 0].delta.max()
+    max_rise = df1[df1.pctchange > 0].delta.max()
+
+    return (s, dte, max_fall, max_rise)
+
+
 def get_market(msg: str = "") -> str:
 
     # . get user input for market

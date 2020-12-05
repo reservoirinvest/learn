@@ -48,9 +48,9 @@ def get_defends(MARKET: str = 'SNP', SAVEXL: bool = True):
         df_symlots[df_symlots.symbol.isin(undef)].contract.unique())
 
     df_ch = get_chains(MARKET=MARKET, und_cts=undef_cts,
-                       savedf=False, RUN_ON_PAPER=False)
+                       SAVE=False, RUN_ON_PAPER=False)
     df_u = get_unds(MARKET=MARKET, und_cts=undef_cts,
-                    savedf=False, RUN_ON_PAPER=False)
+                    SAVE=False, RUN_ON_PAPER=False)
 
     # * BUILD CHAINS
 

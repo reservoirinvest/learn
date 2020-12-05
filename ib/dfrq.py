@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from ib_insync import IB, Contract, MarketOrder, util
 
-from engine import Timer, Vars, executeAsync, margin, qualify, save_df
+from engine import Timer, Vars, executeAsync, margin, qualify, post_df
 from support import get_market, quick_pf
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
@@ -76,7 +76,7 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
                     cts=cos,
                     CONCURRENT=200,
                     TIMEOUT=5,
-                    post_process=save_df,
+                    post_process=post_df,
                     OP_FILENAME="",
                     **{"FILL_DELAY": 5},
                 )
