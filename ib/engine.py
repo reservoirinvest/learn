@@ -1,5 +1,6 @@
 # ** SETUP
 # .Imports
+
 import asyncio
 import math
 import os
@@ -387,13 +388,11 @@ def pre_process(cts):
 def make_name(cts):
     """Generates name for contract(s)"""
     try:
-        output = [
-            c.symbol + c.lastTradeDateOrContractMonth[-4:] + c.right +
-            str(c.strike) + ".." for c in cts
-        ]
+        output = [c.symbol + c.lastTradeDateOrContractMonth[-4:] + c.right + \
+            str(c.strike) + ".." for c in cts]
 
     except TypeError as te:  # single non-iterable element
-        if cts:  # not empty!
+        if cts != '':  # not empty!
             output = (cts.symbol + cts.lastTradeDateOrContractMonth[-4:] +
                       cts.right + str(cts.strike))
         else:
@@ -401,11 +400,9 @@ def make_name(cts):
 
     except AttributeError as ae1:  # multiple (p, s) combination
         try:
-            output = [
-                c[0].symbol + c[0].lastTradeDateOrContractMonth[-4:] +
-                c[0].right + str(c[0].strike) + ".." for c in cts
-            ]
-        except TypeError as ae2:
+            output = [c[0].symbol + c[0].lastTradeDateOrContractMonth[-4:] + \
+                c[0].right + str(c[0].strike) + ".." for c in cts]
+        except TypeError as te2:
             output = (cts[0].symbol +
                       cts[0].lastTradeDateOrContractMonth[-4:] + cts[0].right +
                       str(cts[0].strike))
@@ -438,7 +435,7 @@ async def executeAsync(
     if SHOW_TQDM:
         pbar = tqdm(
             total=len(remaining), desc=f"{algo.__name__}: ",
-            bar_format=BAR_FORMAT, ncols=80,
+            bar_format=BAR_FORMAT, ncols=80, leave=False,
         )
 
     # Get the results
@@ -1246,7 +1243,7 @@ def qualify_opts(MARKET: str,
                 CONCURRENT=200,
                 TIMEOUT=5,
                 post_process=post_df,
-                SHOW_TQDM=False,
+                SHOW_TQDM=True,
             ))
 
             # Successes

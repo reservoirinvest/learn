@@ -140,7 +140,9 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
     dfrq = dfrq.assign(remq=remq)
 
     dfrq.loc[dfrq.remq < 0, "remq"] = 0  # zerorize negative remq
-    dfrq = dfrq.assign(remq=dfrq.remq.apply(round))  # round up to integer
+    # dfrq = dfrq.assign(remq=dfrq.remq.apply(round))  # round up to integer
+    
+    dfrq = dfrq.assign(remq = dfrq.remq.fillna(0).astype('int'))  # round to integer
 
     # .set minimum of 1 contract for high gross symbols
     dfrq.loc[(dfrq.remq == 0) & dfrq.grosspos.isnull(), "remq"] = 1
