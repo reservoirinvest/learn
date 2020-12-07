@@ -12,8 +12,11 @@ from ib_insync import IB, MarketOrder, util
 
 from dfrq import get_dfrq
 from engine import executeAsync, get_unds, margin, price, post_df
-from support import (Timer, Vars, calcsdmult_df, get_dte, get_market, get_prec,
-                     yes_or_no)
+from support import (Timer, Vars, calcsdmult_df, get_dte, get_market, get_prec, get_prob,
+                     yes_or_no, fallrise)
+
+# Set pandas display format
+pd.options.display.float_format = '{:,.2f}'.format
 
 
 def get_nakeds(MARKET: str,
@@ -49,13 +52,25 @@ def get_nakeds(MARKET: str,
     qopts = pd.read_pickle(DATAPATH.joinpath("qopts.pkl"))
     df_symlots = pd.read_pickle(DATAPATH.joinpath("df_symlots.pkl"))
     df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
+    df_ohlcs = pd.read_pickle(DATAPATH.joinpath("df_ohlcs.pkl"))
 
-    # * GET df_unds AND dfrq
+    if SYMBOL != '': # This is a single symbol
+        try:
+            und_cts = [df_symlots[df_symlots.symbol == SYMBOL].contract.iloc[0]]
+            df_symlots = df_symlots[df_symlots.symbol == SYMBOL]
+            df_chains = df_chains[df_chains.symbol == SYMBOL]
+            df_ohlcs = df_ohlcs[df_ohlcs.symbol == SYMBOL]
 
-    if SYMBOL != '': # Filter the contract
-        und_cts = [df_symlots[df_symlots.symbol == SYMBOL].contract.iloc[0]]
+        except IndexError as ie:
+            print(f"\nSymbol: {SYMBOL} not in df_symlots.pkl.\n" +
+                  f"...if needed put the {SYMBOL} in var.yml -> SPECIALS\n")
+
+            return None # !!! ABORT NAKEDS DUE TO MISSING SYMBOL
+
     else: # Do for all underlyings
         und_cts = df_symlots.contract.unique()
+
+    # * GET df_unds AND dfrq
 
     if RECALC_UNDS:
         df_unds = get_unds(MARKET, und_cts, SAVE=False)
@@ -113,6 +128,32 @@ def get_nakeds(MARKET: str,
         .reset_index()
     )
 
+    # * INTEGRATE FALLRISE
+
+    sym_dtes = df_nakeds.groupby('symbol').dte.unique().to_dict()
+
+    fr = [fallrise(df_hist=df_ohlcs[df_ohlcs.symbol == k], dte=d)
+        for k, v in sym_dtes.items() for d in v]
+    df_fr = pd.DataFrame(fr).rename(
+        columns={0: 'symbol', 1: 'dte', 2: 'rise', 3: 'fall'})
+
+    # . integrate fallrise df with undPrice
+    df_fr1 = df_fr.set_index('symbol').join(df_unds[['symbol', 'undPrice']].set_index('symbol')).reset_index()
+
+    # . make the rights
+    df_fr1 = pd.concat([df_fr1.assign(right='C'), df_fr1.assign(right='P')], ignore_index=True)
+
+    # . make the gross fallrise w.r.t undPrice
+    df_fr1 = df_fr1.assign(fallrise=np.where(df_fr1.right == 'C', df_fr1.undPrice+df_fr1.rise, df_fr1.undPrice-df_fr1.fall))
+
+    # . integrate fallrise with nakeds
+    frcols = ['symbol', 'dte', 'right']
+    df_nakeds = df_nakeds.set_index(frcols).join(df_fr1[frcols+['fallrise']].set_index(frcols)).reset_index()
+
+    # . get the fallrise standard deviation multiple
+    df_nakeds = df_nakeds.assign(fr_sd=calcsdmult_df(df_nakeds.fallrise, df_nakeds))
+
+
     # .. compute One stdev
     df_nakeds = df_nakeds.assign(
         sd1=df_nakeds.undPrice * df_nakeds.iv *
@@ -123,6 +164,13 @@ def get_nakeds(MARKET: str,
     lo_sd = df_nakeds.undPrice - df_nakeds.sd1 * ibp.PUTSTDMULT
 
     df_nakeds = df_nakeds.assign(hi_sd=hi_sd, lo_sd=lo_sd)
+
+    # . map remaining quantities
+    # .... map symbol to remqty
+    remq = dfrq.set_index("symbol").remq.to_dict()
+
+    # ... limit remqty to MAXOPTQTY_SYM
+    remq = {k: min(v, ibp.MAXOPTQTY_SYM) for k, v in remq.items()}
 
     # If save is selected for ALL nakeds
     if SAVE:
@@ -135,11 +183,6 @@ def get_nakeds(MARKET: str,
         df_nakeds = df_nakeds[fence_mask]
 
         # .remove options outside of remqty / MAXOPTQTY_SYM
-        # .... map symbol to remqty
-        remq = dfrq.set_index("symbol").remq.to_dict()
-
-        # ... limit remqty to MAXOPTQTY_SYM
-        remq = {k: min(v, ibp.MAXOPTQTY_SYM) for k, v in remq.items()}
 
         # ... sort and pick top options around the fence [ref: https://stackoverflow.com/questions/64864630]
         # . reverse strike for Calls to get the right sort order for top values
@@ -252,6 +295,11 @@ def get_nakeds(MARKET: str,
         .reset_index()
     )
 
+    # . remove nakeds with intrinsic value
+    m1 = (df_nakeds2.right == 'P') & (df_nakeds2.strike < df_nakeds2.undPrice)
+    m2 = (df_nakeds2.right == 'C') & (df_nakeds2.strike > df_nakeds2.undPrice)
+    df_nakeds2 = df_nakeds2[m1|m2].reset_index(drop=True)    
+
     # . update null iv with und_iv
     m_iv = df_nakeds2.iv.isnull()
     df_nakeds2.loc[m_iv, "iv"] = df_nakeds2[m_iv].und_iv
@@ -308,11 +356,21 @@ def get_nakeds(MARKET: str,
     # . remove NaN from expPrice
     df_nakeds2 = df_nakeds2.dropna(subset=["expPrice"]).reset_index(drop=True)
 
+    # . compress hi_sd and lo_sd
+    df_nakeds2 = df_nakeds2.assign(sd_lmt=np.where(df_nakeds2.right == 'C', 
+                                        df_nakeds2.hi_sd, df_nakeds2.lo_sd))
+
+    # . get the probability of profit
+    df_nakeds2 = df_nakeds2.assign(prop=df_nakeds2.sdMult.apply(get_prob))
+
+    # . get the remaining quantities
+    df_nakeds2 = df_nakeds2.assign(remq=df_nakeds2.symbol.map(remq))
+
     # . focus and arrange columns
-    cols = ['conId', 'symbol', 'expiry', 'strike', 'secType', 'dte', 'right',
-        'contract', 'und_iv', 'undPrice', 'hi_sd', 'lo_sd', 'lot', 'iv', 'qty', 'comm',
-        'margin', 'bid', 'ask', 'close', 'last', 'sdMult',
-        'intrinsic', 'timevalue', 'price', 'expPrice', 'rom', 'expRom']
+    cols = ['conId', 'contract', 'secType', 'symbol', 'expiry', 'dte', 'right', 'strike', 
+        'sd_lmt', 'fallrise', 'fr_sd', 'undPrice', 'und_iv', 'lot', 'iv', 'qty', 'remq', 'comm',
+        'margin', 'bid', 'ask', 'close', 'last', 'sdMult', 'prop', 'intrinsic', 'timevalue', 
+        'price', 'expPrice', 'rom', 'expRom']
 
     df_nakeds2 = df_nakeds2[cols]
 
@@ -353,8 +411,7 @@ def get_nakeds(MARKET: str,
             # Hide all rows without data
             sht.set_default_row(hide_unused_rows=True)
 
-            sht.set_column("A:A", None, None, {"hidden": True})  # Hide conId
-            sht.set_column("H:H", None, None, {"hidden": True})  # Hide contract
+            sht.set_column("A:C", None, None, {"hidden": True})  # Hide conId, contract, secType
 
         try:
             writer.save()
@@ -371,7 +428,7 @@ if __name__ == "__main__":
     MARKET = get_market("Create nakeds options for:")
     ONE_SYMBOL = yes_or_no("For ONE symbol? ")
     if ONE_SYMBOL:
-        SYMBOL = input(f"\nGive the name of symbol: ")
+        SYMBOL = input(f"\nGive the name of symbol: ").upper()
     else:
         SYMBOL = ''
     
@@ -379,4 +436,10 @@ if __name__ == "__main__":
 
     RECALC_UNDS = yes_or_no('Want to recaculate underlyings? ')
 
-    get_nakeds(MARKET=MARKET, RECALC_UNDS=RECALC_UNDS, SYMBOL=SYMBOL, EARLIEST = EARLIEST)
+    y = get_nakeds(MARKET=MARKET, 
+                   RECALC_UNDS=RECALC_UNDS, 
+                   SYMBOL=SYMBOL, 
+                   EARLIEST = EARLIEST)
+
+    print(y.drop(['conId', 'contract', 'secType', 'comm', 'lot', 'bid', 'expiry', 
+                  'close', 'last','intrinsic', 'timevalue'], 1))

@@ -907,6 +907,12 @@ def get_unds(MARKET: str,
     else:
         OP_FILENAME = ""
 
+    # Quicken unds for single symbol
+    if len(und_cts) > 1:
+        DLY = 8
+    else:
+        DLY = 5
+
     with IB().connect(HOST, PORT, CID) as ib:
         df_unds = ib.run(
             executeAsync(
@@ -914,11 +920,11 @@ def get_unds(MARKET: str,
                 algo=und,
                 cts=und_cts,
                 CONCURRENT=40,
-                TIMEOUT=8,
+                TIMEOUT=DLY,
                 post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME="",
-                **{"FILL_DELAY": 8},
+                **{"FILL_DELAY": DLY},
             ))
         ib.disconnect()
         IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
@@ -1562,8 +1568,9 @@ def get_opts(
         MARKET: str,
         OP_FILENAME: str = 'df_opts.pkl') -> pd.DataFrame:
 
+    """Note: output df will have price / margin as NaN, if df_prices.pkl / df_margins.pkl are not present"""
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
-    TEMPL_PATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "template")
+    TEMPL_PATH = pathlib.Path.cwd().joinpath("data", "template")
 
     df_opts_time = Timer(f"{MARKET} df_opts build")
     df_opts_time.start()
@@ -1574,8 +1581,15 @@ def get_opts(
     df_unds = pd.read_pickle(DATAPATH.joinpath('df_unds.pkl'))
 
     # * STAGE PRICE AND MARGIN
-    df_opt_prices = pd.read_pickle(DATAPATH.joinpath('df_opt_prices.pkl'))
-    df_opt_margins = pd.read_pickle(DATAPATH.joinpath('df_opt_margins.pkl'))
+    try:
+        df_opt_prices = pd.read_pickle(DATAPATH.joinpath('df_opt_prices.pkl'))
+    except FileNotFoundError:
+        df_opt_prices = pd.read_pickle(TEMPL_PATH.joinpath('df_price.pkl'))
+
+    try:
+        df_opt_margins = pd.read_pickle(DATAPATH.joinpath('df_opt_margins.pkl'))
+    except FileNotFoundError:
+        df_opt_margins = pd.read_pickle(TEMPL_PATH.joinpath('df_margin.pkl'))
 
     try:
         df_opt_prices1 = pd.read_pickle(
