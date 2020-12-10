@@ -2,6 +2,7 @@
 # .Imports
 
 import asyncio
+import datetime
 import math
 import os
 import pathlib
@@ -50,23 +51,68 @@ async def ohlc(ib: IB,
                DURATION: int = 365,
                OHLC_DELAY: int = 5) -> pd.DataFrame:
 
+    "Gets OHLC history for stocks / options in UTC date" 
+
     if isinstance(c, tuple):
         c = c[0]
 
+    if c.secType == 'OPT':
+        DUR = "10 D"
+        BAR_SIZE = "8 hours"
+        WHAT_TO_SHOW = "MIDPOINT"
+
+    else: # For options and futures
+        DUR = str(DURATION) + " D"
+        BAR_SIZE = "1 day"
+        WHAT_TO_SHOW = "TRADES"
+
     ohlc = await ib.reqHistoricalDataAsync(
         contract=c,
-        endDateTime="",
-        durationStr=str(DURATION) + " D",
-        barSizeSetting="1 day",
-        whatToShow="Trades",
+        endDateTime=datetime.datetime.now(),
+        durationStr=DUR,
+        barSizeSetting=BAR_SIZE,
+        whatToShow=WHAT_TO_SHOW,
         useRTH=True,
+        formatDate=2, # UTC format
     )
     await asyncio.sleep(OHLC_DELAY)
     df = util.df(ohlc)
-    try:
-        df.insert(0, "symbol", c.symbol)
-    except AttributeError:
-        df = None
+
+    # re-cast OHLC for options
+    if c.secType == 'OPT':
+
+        # Introduce date without time
+        df['dt'] = df['date'].dt.date
+        
+        # get the grouped values for the option
+        g = df.groupby('dt')
+
+        op = g.open.first()
+        hi = g.high.max()
+        lo = g.low.min()
+        cl = g.close.last()
+        vol = g.volume.sum()
+        avg = g.average.mean()
+        bc = g.barCount.sum()        
+
+        df1 = pd.DataFrame({'date': df.dt.unique()})
+
+        df = df1.assign(open=df1['date'].map(op),
+                high=df1['date'].map(hi),
+                low=df1['date'].map(lo),
+                close=df1['date'].map(cl),
+                volume=df1['date'].map(vol),
+                average=df1['date'].map(avg),
+                barCount=df1['date'].map(bc))
+
+        df.insert(0, "localSymbol", c.localSymbol)
+        df.insert(1, "strike", c.strike)
+        df.insert(2, "right", c.right)
+        df.insert(3, "expiry", c.lastTradeDateOrContractMonth)
+
+    df.insert(0, "conId", c.conId)
+    df.insert(1, "symbol", c.symbol)
+
     return df
 
 
@@ -692,6 +738,8 @@ def get_snp(RUN_ON_PAPER: bool = True) -> pd.DataFrame():
     except Exception as e:
         print(f"Error: {e}")
 
+    """ 
+    # * NOT WORKING FROM 12-DEC-2020. CBOE XLS FORMAT CHANGED!!
     df_ix = pd.concat([data[i].loc[:, :0] for i in range(1, 3)],
                       ignore_index=True).rename(columns={0: "symbol"})
     df_ix = df_ix[df_ix.symbol.apply(len) <= 5]
@@ -703,7 +751,14 @@ def get_snp(RUN_ON_PAPER: bool = True) -> pd.DataFrame():
     df_eq["secType"] = "STK"
     df_eq["exchange"] = "SMART"
 
-    df_weeklies = pd.concat([df_ix, df_eq], ignore_index=True)
+    df_weeklies = pd.concat([df_ix, df_eq], ignore_index=True) """
+
+    df = data[0].rename(columns={'STOCKSYMBOL': 'symbol'})[['symbol']]
+    df_weeklies = pd.concat([df.assign(secType='STK', exchange='SMART'), 
+                             df.assign(secType='IND', exchange='CBOE')], 
+                                ignore_index=True)    
+
+
     df_weeklies = df_weeklies.assign(
         symbol=df_weeklies.symbol.str.replace("[^a-zA-Z]", ""))
 
@@ -730,7 +785,10 @@ def get_snp(RUN_ON_PAPER: bool = True) -> pd.DataFrame():
     with IB().connect(HOST, PORT, CID) as ib:
         pf = quick_pf(ib)
 
+    # Additional symbols
     more_syms = set(pf.symbol) - set(df_symlots.symbol)
+    more_syms = more_syms | set(ibp.SPECIALS)
+
 
     df_syms = pd.concat(
         [
@@ -1687,11 +1745,11 @@ def get_opts(
     return df_opts
 
 
-# !!! TEMPORARY - Checking get_opts
+# !!! TEMPORARY - Testing OHLC
 if __name__ == "__main__":
 
-    MARKET = 'SNP'
-    
-    x = get_opts(MARKET)
+    MARKET = 'NSE'
 
-    print(x)
+    optspath = r'./ib/data/'+MARKET.lower()+r'/df_opts.pkl'
+
+    df_opts = pd.read_pickle(optspath)

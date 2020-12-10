@@ -340,6 +340,18 @@ def get_prob(sd):
     return prob
 
 
+def get_col_widths(dataframe):
+    """Provide column widths for `auto-fitting` pandas dataframe"""
+    
+    widths = [max([len(str(round(s,2))) 
+                   if isinstance(s, float) 
+                   else len(str(s)) 
+                       for s in dataframe[col].values] + [len(col)*1.2])
+                          for col in dataframe.columns]
+    
+    return widths
+    
+
 async def isMarketOpen(ib: IB, MARKET: str) -> bool:
     """Determines if market is open or not
 
@@ -457,6 +469,8 @@ def watchlist(MARKET: str, symbols: list, FILE_NAME="watchlist.csv") -> pd.DataF
             for s in df_syms.itertuples():
                 f.write(f"DES,{s[1]},{s[2]},{s[3]}\n")
     return df_syms
+
+
 
 
 if __name__ == "__main__":

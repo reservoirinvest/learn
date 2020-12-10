@@ -11,6 +11,7 @@ COMMON:
   - PreSubmitted
   - Submitted
   BAR_FORMAT: "{desc:<10}{percentage:3.0f}%|{bar:25}{r_bar}{bar:-10b}"
+  
 NSE:
   EXCHANGE: 'NSE'
   CURRENCY: 'INR'
@@ -23,6 +24,7 @@ NSE:
   POSN_LIMIT: 0.18 # Each symbol's market value should not be greater than 18% of NLV
   BLACKLIST: # Ref: https://zerodha.com/margin-calculator/SPAN/
   - RCOM
+
   POSN_LIMIT: 0.10 # Each symbol's market value should not be greater than 18% of NLV
   
   # For edge
@@ -34,9 +36,9 @@ NSE:
   
   PREC: 0.05
 
-  CALLSTDMULT: 1.25 # Min stdev multiple for calls
-  PUTSTDMULT: 1.25 # Min stdev multiple for puts
-  MINEXPROM: 0.7
+  CALLSTDMULT: 1.2 # Min stdev multiple for calls
+  PUTSTDMULT: 1.2 # Min stdev multiple for puts
+  MINEXPROM: 0.45
 
   MINROM: 0.15
   MINOPTSELLPRICE: 0.05
@@ -75,11 +77,11 @@ SNP:
   # If both FALLRISE & HILO52 are selected, best of both price will be taken.
   PREC: 0.01
 
-  CALLSTDMULT: 1.8 # Min stdev multiple for calls
-  PUTSTDMULT: 2 #  Min stdev multiple for puts
+  CALLSTDMULT: 1.35 # Min stdev multiple for calls
+  PUTSTDMULT: 1.45 #  Min stdev multiple for puts
   MINEXPROM: 2
 
-  MINROM: 0.4
+  MINROM: 1.85
   MINOPTSELLPRICE: 0.2
   MAXOPTQTY_SYM: 5 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
 
