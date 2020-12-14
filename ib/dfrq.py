@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from ib_insync import IB, Contract, MarketOrder, util
 
-from engine import Timer, Vars, executeAsync, margin, qualify, post_df
+from engine import Timer, Vars, executeAsync, margin, post_df, qualify
 from support import get_market, quick_pf
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +81,10 @@ def get_dfrq(MARKET: str) -> pd.DataFrame:
                     **{"FILL_DELAY": 5},
                 )
             )
+
+            # to prevent TimeoutError()
+            ib.disconnect()
+            IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
 
         df_pf = (
             df_pf.set_index("conId")

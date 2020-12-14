@@ -373,6 +373,8 @@ if __name__ == "__main__":
 
     if SAVE:
         NKD_FILENAME = input('Give Filename to save with `.pkl` extension (e.g. df_nakeds.pkl): ')
+        if NKD_FILENAME == '':
+            NKD_FILENAME = 'df_nakeds.pkl'
 
     y = get_nakeds(MARKET=MARKET, 
                    RECALC_UNDS=RECALC_UNDS, 

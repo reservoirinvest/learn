@@ -1,20 +1,64 @@
 # Introduction
-Interactive Brokers programs
+Set of programs for Interactive Brokers - <b>Trade Order Management System (TOMS)</b>
 
-# Incomplete TODOs
-* [ ] Selection for **engine**
-* [ ] Split `price` and `margin` for independent checkpoint-based updates
-* [ ] `Friday` function for weekly trades in SNP
-* [ ] Add `hi52` and `lo52` to **fresh()**
-* [ ] Add YAML `filter` selection fo **fresh()**
+# TODOs
+* [ ] Document **TOMS**
+* [ ] *dfrq* elimination in *nakeds.py*
+* [ ] Add YAML `filter` selection for *nakeds.py*
 * [ ] Make a `Connection` class that detects if server is up or not
 
 ## TODO: Questions for analysis
 * Maximum grosspos for NSE (strike * lot). This should be the grosspos benchmark.
 * Extract bid-ask-last for NSE from website. This is useful for pre-market trade setup.
 
+# Methodology
+```mermaid
+graph LR
+	B[Build] --> 
+	C[Confirm] -->
+	M[Monitor]
+	style B fill:#f6d6bd, stroke:#333, stroke-width:4px
+	style C fill:#c0edef, stroke:#333, stroke-width:4px
+	style M fill:#eeffcc, stroke:#333, stroke-width:4px
+
+```
+
+## Build
+
+* Builds a `base` model for options:
+  - either with *prices* and *margins*
+  - or without *prices* and *margins*
+* Makes
+  - `covers` for covered calls and puts SELLs
+  - `defends` for defending existing positions BUYs
+  - `orphans` for orphaned defenses
+  - `harvests` for matured options
+
+<ins>Note</ins>
+* Build uses functions from engine.py and support.py
+* `base` model can be built on **`PAPER`** account
+* `covers`, `defends`, `orophans` and `harvests` require **`LIVE`** account
+
+## Confirm
+
+* Visualize and evaluate OHLC unds and options
+* Evaluate overall Positions, P&L and Risk scenarios 
+* Adjust YAML parameters
+* Deep-dive on specific symbols
+* Order 
+
+## Monitor
+
+* Breaches
+* Orders and Fills
+	- Dynamic price modification upon fill
+* Positions 
+	- with Status (balanced, orphaned, uncovered, undefended, dodos, unharvested)
+	- for Risk: Reward
+* System health
+
 # Core Functions
-* Usually `RUN_ON_PAPER` in the background
+
 ## 1. ENGINE FUNCTION:
 
 ### For a market
@@ -46,53 +90,6 @@ Interactive Brokers programs
 	* get option `margin`, `price` and `iv` with `time_stamp`
 	* save `df_opts.pkl`
 
-### For a market
-
-* generate `dfrq`
-
-* check `YAML FILTER`s:
-	* ONLYPUTS
-	* FALLRISE
-	* HL52
-
-* make df_fresh
-
-* check how to generate:
-	* from qopts.pkl? (DEFAULT)
-	* from df_opts.pkl? (Fastest)
-	* from raw_opts?
-
-* scrub df_fresh
-  * Generate raw_opts / load df_raw_opts
-  * remove anything that is not `fresh`
-  * remove `BLACKLIST`
-  * remove dtes
-  * ---
-
-  * get `und_price` and `und_iv`
-  * compute `1sd` or one standard deviation
-  * generate the fence based on YAML call and put stdev multiples
-  * remove options within the `fence`
-  * ---
-
-  * integrate `rem_qty`
-  * for each dte and symbol:
-  * remove options beyond ``min(rem_qty, MAXOPTQTY_SYM)`` set in YAML
-
-* integrate `FALLRISE` and `HILO52`
-
-* if raw_opts was selected, `qualify` option contracts if raw_opts
-* get the `price`,`margin` and `iv` of the options
-
-* set `expRom` and `expPrice`
-* sort by `rom`
-
-* split `df_calls` and `df_puts`
-* if market is open, filter df_calls and df_puts for df_xx.ask > 0
-
-* pickle `df_fresh`
-* set columns and save to Excel
-	
 ## 4. ORPHAN FUNCTION
 * For orphaned options
 	
@@ -101,15 +98,12 @@ Interactive Brokers programs
 * For the uncovered	
 	
 	
-	
 ## 6. DEFEND FUNCTION
 * For the undefended and inadequately defended
 
 
-
 ## 7. HARVEST FUNCTION
 * For ripe NAKEDs
-
 
 
 ## 8. SYSTEMATIC FUNCTION
@@ -144,4 +138,31 @@ Interactive Brokers programs
 
 ### Generate P&L: `get_pnl`
 
+# Installation Notes:
 
+## 1. VS Code
+
+### Extensions installed
+* [Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python)
+* [Juypter](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter)
+* [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments) - for colour-coding comments
+* [Markdown Peview Enhanced](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) - also supports mermaid!
+	* [Mermaid Markdown Syntax Highilighting](https://marketplace.visualstudio.com/items?itemName=bpruitt-goddard.mermaid-markdown-syntax-highlighting)
+* [Peacoock](https://marketplace.visualstudio.com/items?itemName=johnpapa.vscode-peacock) - for colour-coding vs code instances
+
+### * Enable `black` formatter with auotosave
+   - *Note*: black has to be installed `pip install black`
+
+* Go to Settings -> `python formatting provider` and choose `black` in it
+
+* Alternatively set the following in .vscode-> settings.json:
+>    "python.formatting.provider": "black",
+>    "editor.formatOnSave": true
+
+### * Disable pyling warning
+ - `Instance has no member for class`
+* Set the following in .vscode->settings.json:
+> "python.linting.pylintArgs":[ "--load-plugins"] 
+
+### * Enable organize imports on save
+> "editor.codeActionsOnSave": {"source.organizeImports": true}

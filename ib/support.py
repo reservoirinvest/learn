@@ -8,6 +8,7 @@ import pathlib
 import re
 import time
 from collections import defaultdict
+from typing import List, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ import yaml
 from ib_insync import IB, Stock, util
 from pytz import timezone
 from scipy.integrate import quad
+from tqdm import tqdm
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 VAR_YML = os.path.join(THIS_FOLDER, "var.yml")
@@ -72,11 +74,11 @@ class Timer:
 
 def yes_or_no(question):
     while True:
-        answer = input(question + ' (y/n): ').lower().strip()
-        if answer in ('y', 'yes', 'n', 'no'):
-            return answer in ('y', 'yes')
+        answer = input(question + " (y/n): ").lower().strip()
+        if answer in ("y", "yes", "n", "no"):
+            return answer in ("y", "yes")
         else:
-            print('You must answer yes or no.')
+            print("You must answer yes or no.")
 
 
 def abs_int(x):
@@ -105,7 +107,7 @@ def calcsdmult_df(price, df):
     Returns:
         Series of std deviation multiple as float
 
-        """
+    """
     sdevmult = (price - df.undPrice) / (
         (df.dte / 365).apply(math.sqrt) * df.iv * df.undPrice
     )
@@ -124,7 +126,7 @@ def calcsd(price, undPrice, dte, iv):
     Returns:
         Std deviation of the price in float
 
-        """
+    """
     try:
         sdev = abs((price - undPrice) / (math.sqrt(dte / 365) * iv * undPrice))
     except Exception:
@@ -132,19 +134,58 @@ def calcsd(price, undPrice, dte, iv):
     return sdev
 
 
+def empty_trash(MARKET: str):
+    """Delete trash from DATAPATH and LOGPATH"""
+
+    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
+    LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
+
+    do_not_delete = [
+        ".keep",
+        "qopts.pkl",
+        "qopt_rejects.pkl",
+        "df_symlots.pkl",
+        "df_unds.pkl",
+        "df_chains.pkl",
+        "df_ohlcs.pkl",
+    ]
+
+    data_fs = os.listdir(DATAPATH)
+    data_files = [f for f in data_fs if f not in do_not_delete]
+
+    for f in data_files:
+        try:
+            os.remove(DATAPATH.joinpath(f))
+        except (FileNotFoundError, PermissionError):
+            print(f"\n...file {f} could not be deleted!")
+
+    log_fs = os.listdir(LOGPATH)
+    log_files = [f for f in log_fs if f[:3] == MARKET.lower()]
+
+    for f in log_files:
+        try:
+            os.remove(LOGPATH.joinpath(f))
+        except (FileNotFoundError, PermissionError):
+            pass
+
+    return None
+
+
 def fallrise(df_hist, dte):
-    '''Gets the fall and rise for a specific dte
+    """Gets the fall and rise for a specific dte
 
     Args:
         (df_hist) as a df with historical ohlc for a scrip
         (dte) as int for days to expiry
     Returns:
-        {dte: {'fall': fall, 'rise': rise}} as a dictionary of floats'''
+        {dte: {'fall': fall, 'rise': rise}} as a dictionary of floats"""
 
     s = df_hist.symbol.unique()[0]
-    df = df_hist.set_index('date').sort_index(ascending=True)
-    df = df.assign(delta=df.high.rolling(dte).max() - df.low.rolling(dte).min(),
-                   pctchange=df.close.pct_change(periods=dte))
+    df = df_hist.set_index("date").sort_index(ascending=True)
+    df = df.assign(
+        delta=df.high.rolling(dte).max() - df.low.rolling(dte).min(),
+        pctchange=df.close.pct_change(periods=dte),
+    )
 
     df1 = df.sort_index(ascending=False)
     max_fall = df1[df1.pctchange <= 0].delta.max()
@@ -187,8 +228,7 @@ def get_dte(dt):
         days to expiry as int"""
 
     try:
-        dte = (util.parseIBDatetime(dt) -
-               datetime.datetime.utcnow().date()).days
+        dte = (util.parseIBDatetime(dt) - datetime.datetime.utcnow().date()).days
     except Exception:
         dte = None
 
@@ -198,10 +238,10 @@ def get_dte(dt):
 def get_openorders(MARKET: str) -> pd.DataFrame:
     """Gets openorders
 
-    Arg: 
+    Arg:
         (MARKET) as str SNP|NSE
 
-    Returns: 
+    Returns:
         dataframe of openorders
 
     """
@@ -319,8 +359,7 @@ def get_prec(v, base):
         the precise value"""
 
     try:
-        output = round(round((v) / base) * base, -
-                       int(math.floor(math.log10(base))))
+        output = round(round((v) / base) * base, -int(math.floor(math.log10(base))))
     except Exception:
         output = None
 
@@ -328,29 +367,34 @@ def get_prec(v, base):
 
 
 def get_prob(sd):
-    '''Compute probability of a normal standard deviation
+    """Compute probability of a normal standard deviation
 
     Arg:
         (sd) as standard deviation
     Returns:
         probability as a float
 
-    '''
-    prob = quad(lambda x: np.exp(-x**2 / 2) / np.sqrt(2 * np.pi), -sd, sd)[0]
+    """
+    prob = quad(lambda x: np.exp(-(x ** 2) / 2) / np.sqrt(2 * np.pi), -sd, sd)[0]
     return prob
 
 
 def get_col_widths(dataframe):
     """Provide column widths for `auto-fitting` pandas dataframe"""
-    
-    widths = [max([len(str(round(s,2))) 
-                   if isinstance(s, float) 
-                   else len(str(s)) 
-                       for s in dataframe[col].values] + [len(col)*1.2])
-                          for col in dataframe.columns]
-    
+
+    widths = [
+        max(
+            [
+                len(str(round(s, 2))) if isinstance(s, float) else len(str(s))
+                for s in dataframe[col].values
+            ]
+            + [len(col) * 1.2]
+        )
+        for col in dataframe.columns
+    ]
+
     return widths
-    
+
 
 async def isMarketOpen(ib: IB, MARKET: str) -> bool:
     """Determines if market is open or not
@@ -363,7 +407,7 @@ async def isMarketOpen(ib: IB, MARKET: str) -> bool:
     Returns:
         bool
 
-    Note: 
+    Note:
      - Though IB uses UTC elsewhere, in contract details `zone` is available as a string!
      - ...hence times are converted to local market times for comparison
 
@@ -411,13 +455,36 @@ async def isMarketOpen(ib: IB, MARKET: str) -> bool:
 
     tframe = tframe.assign(open=open, close=close)
     tframe = tframe.assign(
-        isopen=(tframe["now"] >= tframe["open"]) & (
-            tframe["now"] <= tframe["close"])
+        isopen=(tframe["now"] >= tframe["open"]) & (tframe["now"] <= tframe["close"])
     )
 
     market_open = any(tframe["isopen"])
 
     return market_open
+
+
+def place_orders(ib: IB, cos: Union[Tuple, List], blk_size: int = 25) -> List:
+    """!!!CAUTION!!!: This places orders in the system
+    NOTE: cos could be a single (contract, order)
+          or a tuple/list of ((c1, o1), (c2, o2)...)
+          made using tuple(zip(cts, ords))"""
+
+    trades = []
+
+    if isinstance(cos, (tuple, list)) and (len(cos) == 2):
+        c, o = cos
+        trades.append(ib.placeOrder(c, o))
+
+    else:
+        cobs = {cos[i : i + blk_size] for i in range(0, len(cos), blk_size)}
+
+        for b in tqdm(cobs):
+            for c, o in b:
+                td = ib.placeOrder(c, o)
+                trades.append(td)
+            ib.sleep(0.75)
+
+    return trades
 
 
 def quick_pf(ib) -> pd.DataFrame:
@@ -469,8 +536,6 @@ def watchlist(MARKET: str, symbols: list, FILE_NAME="watchlist.csv") -> pd.DataF
             for s in df_syms.itertuples():
                 f.write(f"DES,{s[1]},{s[2]},{s[3]}\n")
     return df_syms
-
-
 
 
 if __name__ == "__main__":

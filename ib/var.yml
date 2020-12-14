@@ -3,7 +3,7 @@ COMMON:
   HOST: 127.0.0.1
   CID: 0
   MASTERCID: 10 # Master client for retrieving ALL (manual and API) orders and trades
-  FIRST_XN_TIMEOUT: 0.1 # timeout for first connection to IB 
+  FIRST_XN_TIMEOUT: 0.5 # timeout for first connection to IB 
   BLK: 50
   ACTIVE_STATUS:
   - ApiPending
@@ -17,6 +17,7 @@ NSE:
   CURRENCY: 'INR'
   PORT: 3000
   PAPER: 3001 # For paper trades in IBG
+  MASTERCID: 10 # For order modifications and cancellations
   MINDTE: 1
   MAXDTE: 50
   CUSHION_LIMIT: 0.15 # Cushion should be greater than the cushion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
@@ -36,9 +37,9 @@ NSE:
   
   PREC: 0.05
 
-  CALLSTDMULT: 1.2 # Min stdev multiple for calls
-  PUTSTDMULT: 1.2 # Min stdev multiple for puts
-  MINEXPROM: 0.45
+  CALLSTDMULT: 1.35 # Min stdev multiple for calls
+  PUTSTDMULT: 1.35 # Min stdev multiple for puts
+  MINEXPROM: 0.75
 
   MINROM: 0.15
   MINOPTSELLPRICE: 0.05
@@ -49,6 +50,7 @@ SNP:
   CURRENCY: 'USD'
   PORT: 1300
   PAPER: 1301 # For paper trades in IBG
+  MASTERCID: 10 # For order modifications and cancellations
   MINDTE: 1
   MAXDTE: 45
   CUSHION_LIMIT: 0.3 # Cushion should be greater than the custion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
@@ -82,7 +84,7 @@ SNP:
   MINEXPROM: 2
 
   MINROM: 1.85
-  MINOPTSELLPRICE: 0.2
+  MINOPTSELLPRICE: 0.35
   MAXOPTQTY_SYM: 5 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
 
   COVERSD: 1.4 # For covered calls and puts
