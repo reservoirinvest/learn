@@ -252,15 +252,15 @@ def get_openorders(MARKET: str) -> pd.DataFrame:
     # ... set parameters from var.yml
     ibp = Vars(MARKET.upper())
 
-    HOST, PORT, MASTERCID = ibp.HOST, ibp.PORT, ibp.MASTERCID
+    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.MASTERCID
     ACTIVE_STATUS = ibp.ACTIVE_STATUS
 
     # .. initialize openorder dataframe from template
     df_openords = pd.read_pickle(TMPLTPATH.joinpath("df_openords.pkl"))
 
-    with IB().connect(HOST, PORT, MASTERCID) as ib:
+    with IB().connect(HOST, PORT, CID) as ib:
         ib.reqAllOpenOrders()  # To kickstart collection of open orders
-        ib.sleep(0.3)
+        # ib.sleep(0.3)
         trades = ib.trades()
 
     if trades:

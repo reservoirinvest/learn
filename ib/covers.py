@@ -13,10 +13,13 @@ from dfrq import get_dfrq
 from engine import get_chains, get_margins, get_prices, get_unds, qualify
 from support import Timer, Vars, calcsdmult_df, get_prec, get_prob, quick_pf
 
+import requests
+
 
 # Get covers for stocks
 def get_covers(
     MARKET: str = "SNP",  # currently valid only for SNP!
+    RUN_ON_PAPER: bool = False,
     COVERSD: float = 1.3,
     COV_DEPTH: int = 4,
     SAVEXL: bool = True,
@@ -27,8 +30,11 @@ def get_covers(
 
     # * SETUP
     ibp = Vars(MARKET.upper())  # IB Parameters from var.yml
-
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
+    HOST, CID = ibp.HOST, ibp.CID
+    if RUN_ON_PAPER:
+        PORT = ibp.PAPER
+    else:
+        PORT = ibp.PORT
 
     THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
     LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
