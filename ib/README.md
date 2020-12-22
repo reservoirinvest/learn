@@ -37,7 +37,7 @@ graph LR
 <ins>Note</ins>
 * Build uses functions from engine.py and support.py
 * `base` model can be built on **`PAPER`** account
-* `covers`, `defends`, `orophans` and `harvests` require **`LIVE`** account
+* `covers`, `defends`, `orophans` and `harvests` are to be done on a **`LIVE`** account
 
 ## Confirm
 
@@ -178,7 +178,17 @@ Use the following API settings in *File -> Global Configuration* :
 ![api-settings](./data/img/api_settings.jpg)
 * Ensure that the socket-port is aligned to your PAPER v/s LIVE strategy
 
-### Set heapsize
+#### c. Disable `Price Management Algo` in TWS
+A pesky `price management algo` message which freezes the screen, appears when placing multiple orders in TWS. To disable this:
+
+- Click on the File (or Edit) menu
+- Select Global Configuration
+- Select Presets followed by Stocks (or any other contract type)
+- Scroll down to the Miscellaneous section and check or uncheck the box for Use Price Management Algo
+- Click Apply and OK to save the change.
+![api-settings](./data/img/algo_disable.jpg)
+
+### d. Set heapsize
 Edit `C:\Jts\tws.vmoptions` file to adjust the heapsize as shown in the picture below. You can find this in *Help -> About <ins>T</ins>rader workstation...* menu.
 
 ![heap-size configuration](./data/img/heap_size.jpg)

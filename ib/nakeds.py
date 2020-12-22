@@ -12,8 +12,18 @@ from ib_insync import IB, MarketOrder, util
 
 from dfrq import get_dfrq
 from engine import executeAsync, get_unds, margin, post_df, price
-from support import (Timer, Vars, calcsdmult_df, fallrise, get_col_widths,
-                     get_dte, get_market, get_prec, get_prob, yes_or_no)
+from support import (
+    Timer,
+    Vars,
+    calcsdmult_df,
+    fallrise,
+    get_col_widths,
+    get_dte,
+    get_market,
+    get_prec,
+    get_prob,
+    yes_or_no,
+)
 
 # Set pandas display format
 pd.options.display.float_format = "{:,.2f}".format
@@ -21,7 +31,7 @@ pd.options.display.float_format = "{:,.2f}".format
 
 def get_nakeds(
     MARKET: str,
-    RUN_ON_PAPER: bool,
+    RUN_ON_PAPER: bool = False,
     SYMBOL: str = "",  # Do nakeds for ALL symbols if SYMBOL is null
     EARLIEST: bool = False,  # Filter options only for the earliest DTE
     RECALC_UNDS: bool = True,
@@ -64,14 +74,11 @@ def get_nakeds(
     ):  # default for save all nakeds
         NKD_FILENAME = "df_nakeds.pkl"
 
-    if (SYMBOL != "") | EARLIEST:  # it is single symbol or earliest
-        if NKD_FILENAME != "df_nakeds.pkl":  # something other than df_nakeds.pkl
-            SAVE = True
-        else:
-            SAVE = False
+    elif (SAVE == True) & (SYMBOL != "") & (NKD_FILENAME == ""):
+        NKD_FILENAME = "df_nkd_" + SYMBOL + ".pkl"
+
     else:
-        if SAVE:
-            NKD_FILENAME = "df_nakeds.pkl"
+        NKD_FILENAME = "df_nkd_temp.pkl"
 
     # * GET THE NAKED SYMBOLS
 

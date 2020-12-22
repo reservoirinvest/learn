@@ -13,7 +13,7 @@ from typing import List, Tuple, Union
 import numpy as np
 import pandas as pd
 import yaml
-from ib_insync import IB, Stock, util
+from ib_insync import IB, Stock, util, Contract
 from pytz import timezone
 from scipy.integrate import quad
 from tqdm import tqdm
@@ -25,7 +25,6 @@ VAR_YML = os.path.join(THIS_FOLDER, "var.yml")
 # ** CLASSES
 class Vars:
     """Variables from var.yml"""
-
     def __init__(self, MARKET: str) -> None:
 
         self.MARKET = MARKET
@@ -42,7 +41,6 @@ class Vars:
 
 class Timer:
     """Timer providing elapsed time"""
-
     def __init__(self, name: str = "") -> None:
         self.name = name
         self._start_time = None
@@ -65,20 +63,11 @@ class Timer:
         elapsed_time = time.perf_counter() - self._start_time
 
         print(
-            f"\n...{self.name} took: "
-            + f"{time.strftime('%H:%M:%S', time.gmtime(elapsed_time))} seconds\n"
+            f"\n...{self.name} took: " +
+            f"{time.strftime('%H:%M:%S', time.gmtime(elapsed_time))} seconds\n"
         )
 
         self._start_time = None
-
-
-def yes_or_no(question):
-    while True:
-        answer = input(question + " (y/n): ").lower().strip()
-        if answer in ("y", "yes", "n", "no"):
-            return answer in ("y", "yes")
-        else:
-            print("You must answer yes or no.")
 
 
 def abs_int(x):
@@ -109,8 +98,7 @@ def calcsdmult_df(price, df):
 
     """
     sdevmult = (price - df.undPrice) / (
-        (df.dte / 365).apply(math.sqrt) * df.iv * df.undPrice
-    )
+        (df.dte / 365).apply(math.sqrt) * df.iv * df.undPrice)
     return abs(sdevmult)
 
 
@@ -228,7 +216,8 @@ def get_dte(dt):
         days to expiry as int"""
 
     try:
-        dte = (util.parseIBDatetime(dt) - datetime.datetime.utcnow().date()).days
+        dte = (util.parseIBDatetime(dt) -
+               datetime.datetime.utcnow().date()).days
     except Exception:
         dte = None
 
@@ -264,15 +253,14 @@ def get_openorders(MARKET: str) -> pd.DataFrame:
         trades = ib.trades()
 
     if trades:
-        all_trades_df = (
-            util.df(t.contract for t in trades)
-            .join(util.df(t.orderStatus for t in trades))
-            .join(util.df(t.order for t in trades), lsuffix="_")
-        )
+        all_trades_df = (util.df(t.contract for t in trades).join(
+            util.df(t.orderStatus
+                    for t in trades)).join(util.df(t.order for t in trades),
+                                           lsuffix="_"))
 
-        all_trades_df.rename(
-            {"lastTradeDateOrContractMonth": "expiry"}, axis="columns", inplace=True
-        )
+        all_trades_df.rename({"lastTradeDateOrContractMonth": "expiry"},
+                             axis="columns",
+                             inplace=True)
         trades_cols = [
             "conId",
             "symbol",
@@ -310,17 +298,13 @@ async def get_pnl(ib, MARKET):
     pnlobj = ib.reqPnL(acct)
 
     df_mgns = util.df(ib.accountValues())
-    df_mgns = df_mgns[
-        df_mgns.tag.isin(
-            [
-                "NetLiquidation",
-                "InitMarginReq",
-                "EquityWithLoanValue",
-                "MaintMarginReq",
-                "AccruedCash",
-            ]
-        )
-    ]
+    df_mgns = df_mgns[df_mgns.tag.isin([
+        "NetLiquidation",
+        "InitMarginReq",
+        "EquityWithLoanValue",
+        "MaintMarginReq",
+        "AccruedCash",
+    ])]
     margins = df_mgns.set_index("tag").value.apply(float).to_dict()
 
     # sleep to populate PnL object
@@ -340,9 +324,8 @@ async def get_pnl(ib, MARKET):
     pnl["initialMargin"] = margins["InitMarginReq"]
     pnl["maintMargin"] = margins["MaintMarginReq"]
     pnl["mtdInterest"] = margins["AccruedCash"]
-    pnl["cushion"] = (
-        margins["EquityWithLoanValue"] - margins["MaintMarginReq"]
-    ) / margins["NetLiquidation"]
+    pnl["cushion"] = (margins["EquityWithLoanValue"] -
+                      margins["MaintMarginReq"]) / margins["NetLiquidation"]
     pnl["cushionLmt"] = CUSHION_LIMIT
     pnl["perPositionLmt"] = margins["NetLiquidation"] * POSN_LIMIT
 
@@ -359,7 +342,8 @@ def get_prec(v, base):
         the precise value"""
 
     try:
-        output = round(round((v) / base) * base, -int(math.floor(math.log10(base))))
+        output = round(
+            round((v) / base) * base, -int(math.floor(math.log10(base))))
     except Exception:
         output = None
 
@@ -375,7 +359,7 @@ def get_prob(sd):
         probability as a float
 
     """
-    prob = quad(lambda x: np.exp(-(x ** 2) / 2) / np.sqrt(2 * np.pi), -sd, sd)[0]
+    prob = quad(lambda x: np.exp(-(x**2) / 2) / np.sqrt(2 * np.pi), -sd, sd)[0]
     return prob
 
 
@@ -383,14 +367,10 @@ def get_col_widths(dataframe):
     """Provide column widths for `auto-fitting` pandas dataframe"""
 
     widths = [
-        max(
-            [
-                len(str(round(s, 2))) if isinstance(s, float) else len(str(s))
-                for s in dataframe[col].values
-            ]
-            + [len(col) * 1.2]
-        )
-        for col in dataframe.columns
+        max([
+            len(str(round(s, 2))) if isinstance(s, float) else len(str(s))
+            for s in dataframe[col].values
+        ] + [len(col) * 1.2]) for col in dataframe.columns
     ]
 
     return widths
@@ -422,12 +402,10 @@ async def isMarketOpen(ib: IB, MARKET: str) -> bool:
 
     if MARKET.upper() == "NSE":
         ct = await ib.qualifyContractsAsync(
-            Stock(symbol="RELIANCE", exchange="NSE", currency="INR")
-        )
+            Stock(symbol="RELIANCE", exchange="NSE", currency="INR"))
     elif MARKET.upper() == "SNP":
         ct = await ib.qualifyContractsAsync(
-            Stock(symbol="INTC", exchange="SMART", currency="USD")
-        )
+            Stock(symbol="INTC", exchange="SMART", currency="USD"))
     else:
         print(f"\nUnknown market {MARKET}!!!\n")
         return None
@@ -438,25 +416,25 @@ async def isMarketOpen(ib: IB, MARKET: str) -> bool:
     zone = util.df(ctd).timeZoneId.iloc[0].split(" ")[0]
 
     # Build the time dataframe by splitting hrs
-    tframe = pd.DataFrame([re.split(":|-|,", h) for h in hrs]).rename(
-        columns={0: "from", 1: "start", 2: "to", 3: "end"}
-    )
+    tframe = pd.DataFrame([re.split(":|-|,", h) for h in hrs]).rename(columns={
+        0: "from",
+        1: "start",
+        2: "to",
+        3: "end"
+    })
     tframe["zone"] = zone
     tframe["now"] = datetime.now(tzones[zone])
 
     tframe = tframe.dropna()
 
     open = pd.to_datetime(tframe["from"] + tframe["start"]).apply(
-        lambda x: x.replace(tzinfo=tzones[zone])
-    )
+        lambda x: x.replace(tzinfo=tzones[zone]))
     close = pd.to_datetime(tframe["to"] + tframe["end"]).apply(
-        lambda x: x.replace(tzinfo=tzones[zone])
-    )
+        lambda x: x.replace(tzinfo=tzones[zone]))
 
     tframe = tframe.assign(open=open, close=close)
-    tframe = tframe.assign(
-        isopen=(tframe["now"] >= tframe["open"]) & (tframe["now"] <= tframe["close"])
-    )
+    tframe = tframe.assign(isopen=(tframe["now"] >= tframe["open"])
+                           & (tframe["now"] <= tframe["close"]))
 
     market_open = any(tframe["isopen"])
 
@@ -476,7 +454,7 @@ def place_orders(ib: IB, cos: Union[Tuple, List], blk_size: int = 25) -> List:
         trades.append(ib.placeOrder(c, o))
 
     else:
-        cobs = {cos[i : i + blk_size] for i in range(0, len(cos), blk_size)}
+        cobs = {cos[i:i + blk_size] for i in range(0, len(cos), blk_size)}
 
         for b in tqdm(cobs):
             for c, o in b:
@@ -489,13 +467,13 @@ def place_orders(ib: IB, cos: Union[Tuple, List], blk_size: int = 25) -> List:
 
 def quick_pf(ib) -> pd.DataFrame:
 
-    pf = ib.portfolio()  # returns an empty [] if there is nothing in the portfolio
+    pf = ib.portfolio(
+    )  # returns an empty [] if there is nothing in the portfolio
 
     if pf != []:
         df_pf = util.df(pf)
         df_pf = (util.df(list(df_pf.contract)).iloc[:, :6]).join(
-            df_pf.drop(["contract", "account"], 1)
-        )
+            df_pf.drop(["contract", "account"], 1))
         df_pf = df_pf.rename(
             columns={
                 "lastTradeDateOrContractMonth": "expiry",
@@ -504,16 +482,91 @@ def quick_pf(ib) -> pd.DataFrame:
                 "averageCost": "avgCost",
                 "unrealizedPNL": "unPnL",
                 "realizedPNL": "rePnL",
-            }
-        )
+            })
     else:
-        TEMPL_PATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "template")
+        TEMPL_PATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data",
+                                                 "template")
         df_pf = pd.read_pickle(TEMPL_PATH.joinpath("df_portfolio.pkl"))
 
     return df_pf
 
 
-def watchlist(MARKET: str, symbols: list, FILE_NAME="watchlist.csv") -> pd.DataFrame:
+async def quick_price_async(ib: IB, contract: Contract) -> pd.DataFrame:
+
+    # Check for executeAsync engine
+    if isinstance(contract, tuple):
+        contract = contract[0]
+
+    result = defaultdict(dict)
+
+    ticks = await asyncio.gather(
+        ib.reqHistoricalTicksAsync(
+            contract=contract,
+            startDateTime="",
+            endDateTime=datetime.datetime.now(),
+            numberOfTicks=1,
+            whatToShow="Bid_Ask",
+            useRth=False,
+            ignoreSize=False,
+        ),
+        ib.reqHistoricalTicksAsync(
+            contract=contract,
+            startDateTime="",
+            endDateTime=datetime.datetime.now(),
+            numberOfTicks=1,
+            whatToShow="Trades",
+            useRth=False,
+            ignoreSize=False,
+        ),
+    )
+
+    # extract bid and ask price
+    try:
+        bid_ask = ticks[0][-1]  # bid ask is not availble for Index securities!
+        result["bid"] = bid_ask.priceBid
+        result["ask"] = bid_ask.priceAsk
+
+    except IndexError:
+        print(
+            f"\nNo bid-ask for {contract.localSymbol} of secType: {contract.secType}"
+        )
+        result["bid"] = np.nan
+        result["ask"] = np.nan
+
+    # extract last reported price
+    try:
+        # pick reported price if available
+        result["last"] = [
+            t.price for t in ticks[1] if not t.tickAttribLast.unreported
+        ][-1]
+    except IndexError:
+        # pick up last tick price
+
+        try:
+            result["last"] = ticks[1][-1].price
+        except IndexError:
+            result["last"] = np.nan
+
+    # . build the df
+    df_pr = pd.DataFrame([
+        pd.Series(contract.conId, name="conId"),
+        pd.Series(contract.symbol, name="symbol"),
+        pd.Series(contract.localSymbol, name="localSymbol"),
+        pd.Series(result["bid"], name="bid", dtype="float64"),
+        pd.Series(result["ask"], name="ask", dtype="float64"),
+        pd.Series(result["last"], name="last", dtype="float64"),
+    ]).T
+
+    # . use bid-ask avg if last price is not available
+    df_pr = df_pr.assign(
+        price=df_pr["last"].combine_first(df_pr[["bid", "ask"]].mean(axis=1)))
+
+    return df_pr
+
+
+def watchlist(MARKET: str,
+              symbols: list,
+              FILE_NAME="watchlist.csv") -> pd.DataFrame:
 
     DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
 
@@ -536,6 +589,15 @@ def watchlist(MARKET: str, symbols: list, FILE_NAME="watchlist.csv") -> pd.DataF
             for s in df_syms.itertuples():
                 f.write(f"DES,{s[1]},{s[2]},{s[3]}\n")
     return df_syms
+
+
+def yes_or_no(question):
+    while True:
+        answer = input(question + " (y/n): ").lower().strip()
+        if answer in ("y", "yes", "n", "no"):
+            return answer in ("y", "yes")
+        else:
+            print("You must answer yes or no.")
 
 
 if __name__ == "__main__":
