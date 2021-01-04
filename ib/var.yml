@@ -1,8 +1,16 @@
 ---
 COMMON:
   HOST: 127.0.0.1
+
+  # Client IDs
   CID: 0
-  MASTERCID: 10 # Master client for retrieving ALL (manual and API) orders and trades
+  MASTER: 10 # Master client for retrieving ALL (manual and API) orders and trades
+  QUAL: 1
+  OHLC: 2
+  CHAIN: 3
+  PRICE: 4
+  MARGIN: 5
+
   FIRST_XN_TIMEOUT: 0.5 # timeout for first connection to IB 
   BLK: 50
   ACTIVE_STATUS:
@@ -11,13 +19,12 @@ COMMON:
   - PreSubmitted
   - Submitted
   BAR_FORMAT: "{desc:<10}{percentage:3.0f}%|{bar:25}{r_bar}{bar:-10b}"
-  
+
 NSE:
   EXCHANGE: 'NSE'
   CURRENCY: 'INR'
   PORT: 3000
   PAPER: 3001 # For paper trades in IBG
-  MASTERCID: 10 # For order modifications and cancellations
   MINDTE: 1
   MAXDTE: 50
   CUSHION_LIMIT: 0.15 # Cushion should be greater than the cushion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
@@ -49,9 +56,8 @@ SNP:
   CURRENCY: 'USD'
   PORT: 1300
   PAPER: 1301 # For paper trades in IBG
-  MASTERCID: 10 # For order modifications and cancellations
   MINDTE: 1
-  MAXDTE: 45
+  MAXDTE: 35
   CUSHION_LIMIT: 0.3 # Cushion should be greater than the custion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
   MARGIN_LIMIT: 0.7 # Initial margin should not be greater than 70% of NLV
   POSN_LIMIT: 0.04 # Each symbol's market value should not be greater than 4% of NLV

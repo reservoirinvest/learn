@@ -1,140 +1,276 @@
-# Builds option pickles
+# generates df_opts.pkl without price and margin
+
 import os
 import pathlib
+from collections import defaultdict
 
 import pandas as pd
+from ib_insync import IB, Option, util
+from tqdm import tqdm
 
-from ib_insync import util
+from engine import executeAsync, post_df, qualify
+from support import (Timer, Vars, fallrise, get_dte, get_market, get_rsi,
+                     yes_or_no)
 
-from engine import (
-    get_chains,
-    get_ohlcs,
-    get_opts,
-    get_symlots,
-    get_unds,
-    opt_margins,
-    opt_prices,
-    qualify_opts,
-)
-from support import Timer, empty_trash, get_market, yes_or_no
+## ** SETUP
 
-# get the market
+# user interaction
 MARKET = get_market()
+USE_YAML = yes_or_no('Filter using YAML DTE? :')
+SAVE = yes_or_no('Over-write qopts.pkl and df_opts.pkl? :')
+RUN_ON_PAPER = yes_or_no('Run on PAPER?:')
 
-# .. start the timer
-all_time = Timer("Engine")
-all_time.start()
+# start the timer
+opt_time = Timer("Opts")
+opt_time.start()
 
-RUN_ALL = yes_or_no(f"\n Run ALL base for {MARKET}? ")
+# set the qualified option file names
+OP_FILENAME = 'qopts.pkl'
+REJECT_FILE = OP_FILENAME[:4] + "_rejects.pkl"
+WIP_FILE = OP_FILENAME[:4] + "_wip.pkl"
 
-DELETE_FILES = yes_or_no(f"\n Delete previous pickles and xlsx? ")
+# set up local variables from YML
+ibp = Vars(MARKET)
+locals().update(ibp.__dict__)
 
-THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
-LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
+if RUN_ON_PAPER: PORT=PAPER
 
-# * SETUP LOGS AND CLEAR THEM
-LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_opts.log")
-util.logToFile(path=LOGFILE, level=30)
-with open(LOGFILE, "w"):
+# set up paths
+cwd = pathlib.Path.cwd()
+datapath = cwd.joinpath('data', MARKET.lower())
+
+# log
+logfile = cwd.joinpath('data', 'log', 'opts.log')
+util.logToFile(path=logfile, level=30)
+with open(logfile, "w"):
     pass
 
-# Initialize
-RUN_BASE = False
+# load the files
+df_chains = pd.read_pickle(datapath.joinpath('df_chains.pkl'))
+df_unds = pd.read_pickle(datapath.joinpath('df_unds.pkl'))
+df_ohlcs =  pd.read_pickle(datapath.joinpath('df_ohlcs.pkl'))
 
-if DELETE_FILES:
-    empty_trash(MARKET)
+## ** CLEANUP
 
-if RUN_ALL:
+# remove expired options
+df_chains = df_chains.assign(dte=df_chains.expiry.apply(get_dte))
+df_chains = df_chains[df_chains.dte>=0]
+df_chains.loc[df_chains.dte == 0, 'dte'] = 1 # set last day to 1 for SNP
 
-    RUN_BASE = RUN_QUALIFY = RUN_PRICE = RUN_MARGIN = FINAL_OPTS = True
+if USE_YAML:
+    df_ch = df_chains[df_chains.dte < MAXDTE]
 
-    RUN_ON_PAPER = yes_or_no(f"\n Build all base on paper for {MARKET}? ")
-    REUSE = yes_or_no(f"\n Reuse qualify, price and margin for {MARKET}? ")
+    # get the 6th month option for SNP defends
+    if MARKET.upper() == 'SNP':
+        defend_dte_dict = df_chains[df_chains.dte > eval(DEFEND_DTE)]\
+                        .groupby('symbol').dte.apply(min).to_dict()
+        df_ch_snp = df_chains[df_chains.dte == \
+                        df_chains.symbol.map(defend_dte_dict)]
+        df_ch = pd.concat([df_ch, df_ch_snp], ignore_index=True)
 
 else:
+    df_ch = df_chains
 
-    RUN_QUALIFY = yes_or_no(f"\n Qualify opts? ")
-    RUN_PRICE = yes_or_no(f"\n Run price? ")
-    RUN_MARGIN = yes_or_no(f"\n Run margin? ")
+df_ch = df_ch.drop_duplicates()
 
-    if RUN_QUALIFY:
+# build the rights
+df_ch = pd.concat([df_ch.assign(right='P'), \
+                df_ch.assign(right='C')], ignore_index=True)
 
-        msg = "qualify"
+## ** REUSE qopts
 
-        if RUN_PRICE:
-            msg = "qualify and price"
-        elif RUN_MARGIN:
-            msg = "qualify and margin"
-        elif RUN_PRICE & RUN_MARGIN:
-            msg = "qualify, price and margin"
-    else:
+cols = ["symbol", "expiry", "strike", "right"]
 
-        msg = "price and margin"
+# . qualified opts
+try:
+    qopts = pd.read_pickle(datapath.joinpath(OP_FILENAME))
+    qopts = qopts.drop_duplicates()
 
-        if RUN_PRICE and not RUN_MARGIN:
-            msg = "price"
+    # Clean qopts
+    # ... build df_o
+    df_o = (util.df(qopts.to_list()).iloc[:, :6].rename(
+        columns={
+            "lastTradeDateOrContractMonth": "expiry"
+        }).drop(["conId", "secType"], 1).assign(contract=qopts))
 
-        if RUN_MARGIN and not RUN_PRICE:
-            msg = "margin"
+    df_o = df_o.assign(dte=df_o.expiry.apply(get_dte))
+    df_o = df_o[df_o.dte>=0]
 
-    if RUN_QUALIFY | RUN_PRICE | RUN_MARGIN:
-        REUSE = yes_or_no(f"\n Reuse {msg} for {MARKET}? ")
+    # ... remove df_o not in df_ch
+    m = df_o[cols].apply(tuple, 1).isin(df_ch[cols].apply(tuple, 1))
 
-    FINAL_OPTS = yes_or_no(f"\n Assemble final df_opts for {MARKET}? ")
+    qopts = df_o[m].contract.rename("qualified")
 
-    if RUN_QUALIFY:
-        RUN_ON_PAPER = yes_or_no(f"\n Qualify options for {MARKET} from PAPER? ")
+except FileNotFoundError:
+    # for existing successful options
+    qopts = pd.Series([], dtype=object, name="qualified")
 
-    if RUN_PRICE:
-        RUN_ON_PAPER = yes_or_no(f"\n Get option prices for {MARKET} from PAPER? ")
+# . rejected opts
+try:
+    qropts = pd.read_pickle(datapath.joinpath(REJECT_FILE))
+    # qropts = qropts.drop_duplicates()
 
-    if RUN_MARGIN:
-        RUN_ON_PAPER = yes_or_no(f"\n Get option margins for {MARKET} from PAPER? ")
+    # Clean rejects
+    # ... build df_rejects
+    df_rejects = (util.df(qropts.to_list()).iloc[:, :6].rename(
+        columns={
+            "lastTradeDateOrContractMonth": "expiry"
+        }).drop(["conId", "secType"], 1).assign(contract=qropts))
 
+    df_rejects = df_rejects.assign(dte=df_rejects.expiry.apply(get_dte))
+    df_rejects = df_rejects[df_rejects.dte>=0]
 
-# * ACT ON WHAT HAS BEEN SELECTED
+    # ... remove df_rejects not in df_ch
+    m = df_rejects[cols].apply(tuple, 1).isin(df_ch[cols].apply(tuple, 1))
 
-if RUN_BASE:
-    df_symlots = get_symlots(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER)
+    qropts = df_rejects[m].contract.rename("rejected")
 
-    und_cts = df_symlots.contract.unique()
+except FileNotFoundError:
+    # for rejected options
+    qropts = pd.Series([], dtype=object, name="rejected")
 
-    get_unds(MARKET=MARKET, und_cts=und_cts, RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
+# . wip opts
+try:
+    wips = pd.read_pickle(datapath.joinpath(WIP_FILE))
+    # wips = wips.drop_duplicates()
+except FileNotFoundError:
+    wips = pd.Series([], dtype=object, name="wip")
 
-    get_ohlcs(MARKET=MARKET, und_cts=und_cts, RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
+existing_opts = pd.concat([qopts, qropts, wips], ignore_index=True)
 
-    get_chains(MARKET=MARKET, und_cts=und_cts, RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
+if not existing_opts.empty:  # something is existing!
 
-if RUN_QUALIFY:
-    qualify_opts(
-        MARKET=MARKET,
-        BLK_SIZE=200,
-        RUN_ON_PAPER=RUN_ON_PAPER,
-        USE_YAML_DTE=True,
-        CHECKPOINT=True,
-        REUSE=REUSE,
-        OP_FILENAME="qopts.pkl",
+    df_existing = util.df([e for e in existing_opts if str(e) !='nan'])\
+                      .iloc[:, :6].rename(
+                        columns={
+                            "lastTradeDateOrContractMonth": "expiry"
+                        }).drop("conId", 1)
+
+    # Remove dte<0 for df_existing
+    df_existing = df_existing.assign(dte=df_existing.expiry.apply(get_dte))
+    df_existing = df_existing[df_existing.dte>=0]
+    df_existing.loc[df_existing.dte == 0, 'dte'] = 1 # set last day to 1 for SNP
+    df_existing = df_existing.drop_duplicates()
+
+    # remove existing options from df_ch
+    # Note: df_existing is put twice to remove it completely
+    # ....  ref: so: https://stackoverflow.com/a/37313953
+    df_ch = (pd.concat([df_ch[cols], df_existing[cols], df_existing[cols]],
+                        ignore_index=True).drop_duplicates(
+                            keep=False).reset_index(drop=True))
+
+# * BUILD THE OPTIONS TO BE QUALIFIED
+cts = [
+    Option(s, e, k, r, x) for s, e, k, r, x in zip(
+        df_ch.symbol,
+        df_ch.expiry,
+        df_ch.strike,
+        df_ch.right,
+        ["NSE" if MARKET.upper() == "NSE" else "SMART"] * len(df_ch),
     )
-    if FINAL_OPTS:
-        get_opts(MARKET=MARKET, OP_FILENAME="df_opts.pkl")
+]
 
+BLK_SIZE = 200
 
-if RUN_PRICE:
-    opt_prices(
-        MARKET=MARKET,
-        RUN_ON_PAPER=RUN_ON_PAPER,
-        REUSE=REUSE,
-        OP_FILENAME="df_opt_prices.pkl",
-    )
+# ..build the raw blocks from cts
+raw_blks = [cts[i:i + BLK_SIZE] for i in range(0, len(cts), BLK_SIZE)]
 
-if RUN_MARGIN:
-    opt_margins(
-        MARKET=MARKET,
-        RUN_ON_PAPER=RUN_ON_PAPER,
-        REUSE=REUSE,
-        OP_FILENAME="df_opt_margins.pkl",
-    )
-if FINAL_OPTS:
-    get_opts(MARKET=MARKET, OP_FILENAME="df_opts.pkl")
+with IB().connect(HOST, PORT, QUAL) as ib:
 
-all_time.stop()
+    for b in tqdm(raw_blks,
+                    desc=f"{MARKET} opts qual:",
+                    bar_format=BAR_FORMAT,
+                    ncols=80):
+
+        qs = ib.run(
+            executeAsync(
+                ib=ib,
+                algo=qualify,
+                cts=b,
+                CONCURRENT=200,
+                TIMEOUT=5,
+                post_process=post_df,
+                SHOW_TQDM=True,
+            ))
+
+        # Successes
+        qopts = qopts.append(pd.Series(qs, dtype=object, name="qualified"),
+                                ignore_index=True)
+
+        # Rejects
+        rejects = [c for c in b if not c.conId]
+        qropts = qropts.append(pd.Series(rejects,
+                                            dtype=object,
+                                            name="rejected"),
+                                ignore_index=True)
+
+        if SAVE:  # store the intermediate options while qualifying
+            qopts.to_pickle(datapath.joinpath(WIP_FILE))
+            qropts.to_pickle(datapath.joinpath(REJECT_FILE))
+
+    # to prevent TimeoutError()
+    ib.disconnect()
+    IB().waitOnUpdate(timeout=ibp.FIRST_XN_TIMEOUT)
+
+# Remove blanks
+qopts = pd.Series([q for q in qopts if str(q) != 'nan'], 
+                    name='qualified').drop_duplicates()
+
+# * BUILD DF OPTION
+df_opts = (util.df(qopts.to_list()).iloc[:, :6].assign(
+    contract=qopts).rename(columns={
+        "lastTradeDateOrContractMonth": "expiry"
+    }).drop_duplicates())
+
+# ... integrate lots (from chains), und_iv  and undPrice
+col1 = ["symbol", "strike", "expiry"]
+df_opts = (df_opts.set_index(col1).join(
+    df_chains.set_index(col1)[["lot"]]).reset_index())
+
+# ... process dtes
+df_opts["dte"] = df_opts.expiry.apply(get_dte)
+df_opts = df_opts[df_opts.dte > 0]  # Remove negative dtes
+
+# Make 0 dte positive to avoid sqrt errors
+df_opts.loc[df_opts.dte == 0, "dte"] = 1
+
+df_opts["und_iv"] = df_opts.symbol.map(
+    df_unds.set_index("symbol").iv.to_dict())
+df_opts["undPrice"] = df_opts.symbol.map(
+    df_unds.set_index("symbol").undPrice.to_dict())
+
+# remove df_opts without undPrice
+df_opts = df_opts[df_opts.undPrice.notna()]
+
+# * INTEGRATE FALLRISE
+d = df_opts.groupby('symbol').dte.unique().to_dict()
+s = defaultdict(dict)
+
+for k, v in d.items():
+    fr = defaultdict(dict)
+    for dt in v:
+        try:
+            fr[dt] = fallrise(df_ohlcs[df_ohlcs.symbol==k], dt)
+        except IndexError:
+            pass
+    s[k] = fr
+
+df_fr = pd.concat([pd.DataFrame([v2 for k2, v2 in v1.items()]) for k1, v1 in s.items()], ignore_index=True)
+
+df_opts = df_opts.set_index(['symbol', 'dte']).join(df_fr.set_index(['symbol', 'dte'])).reset_index()
+
+# * INTEGRATE RSI
+rsi = get_rsi(df_ohlcs)
+df_opts = df_opts.set_index('symbol').join(rsi).reset_index()
+
+if SAVE:
+    # ... write final options and cleanup WIP
+    qopts.to_pickle(datapath.joinpath(OP_FILENAME))
+    df_opts.to_pickle(datapath.joinpath('df_opts.pkl'))
+
+    try:
+        os.remove(datapath.joinpath(WIP_FILE))
+    except FileNotFoundError:
+        pass
+
+opt_time.stop()

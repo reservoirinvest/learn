@@ -1,15 +1,58 @@
+# TODOs
+* [x] Build `opts.py` to qualify options from chains - reusing `opts.pkl`
+* [x] Include `14-day` rsi in df_opts
+* [x] Include `rise` and `fall` for dte in df_opts
+* [ ] make `opts.py` into a function
+* [ ] remove `get_opts` function from `nakeds.py` and `engine.py`
+* [ ] remove `get_price` and `get_margin` from `base.py`
+
+* [ ] add `opts.py` to `base.py`
+
+* [ ] Add YAML `filter` selection for strategies
+
+* [ ] Make `price` function for bid-ask-last prices robust
+
+* [ ] remake `nakeds.py` picking up df_opts with price, margin and roms
+
+* [ ] make dataclasses
+
+* [ ] `Deep-dive` for a single option/dte combination
+	* [ ] Plot option and underlying OHLCs with standard deviations
+	* [ ] Sort by `best-trade` - a combo of Reward/Risk, rom and prop
+
 # Introduction
 Set of programs for Interactive Brokers - <b>Trade Order Management System (TOMS)</b>
 
-# TODOs
-* [ ] Document **TOMS**
-* [ ] *dfrq* elimination in *nakeds.py*
-* [ ] Add YAML `filter` selection for *nakeds.py*
-* [ ] Make a `Connection` class that detects if server is up or not
+# Strategy
 
-## TODO: Questions for analysis
-* Maximum grosspos for NSE (strike * lot). This should be the grosspos benchmark.
-* Extract bid-ask-last for NSE from website. This is useful for pre-market trade setup.
+## Order `nakeds` at
+* ~ 1.35 standard deviation and above. Set in var.yml: CALLSTDMULT & PUTSTDMULT
+* 4 to 35 days dte - to give a rolling monthly churn
+* quantities upto `remq` - from dfrq
+* return fixed at the rom of option price closest to 1.35 sd, nearest dte
+* direction driven by 14-day rsi, with some manual intervention based on deep-dive
+  - `Puts` below 40 (oversold)
+  - `Calls` above 60 (overbought)
+  - Both `Puts` and `Calls` between 40 and 60
+* honoring overall margin cushion
+
+## Manage short option positions
+
+Each short position will have a corresponding:
+* `harvest` LMT BUY order - based on a harvest curve
+* `protect` STP BUY order at 3 times the average price
+
+## Manage assignments
+
+In case shorts get assigned:
+* `cover` at 1 standard deviation for the first week
+	- standard deviation will be reduced after every subsequent week
+	- after 4 weeks, position will be closed
+
+## Automated trade (advanced)
+* adjust price of existing orders upon fill
+* provide `harvest` and `protect` orders upon fill
+* cancel `protect` upon `harvest` fill and vice-versa
 
 # Methodology
 ```mermaid
@@ -25,36 +68,77 @@ graph LR
 
 ## Build
 
-* Builds a `base` model for options:
-  - either with *prices* and *margins*
-  - or without *prices* and *margins*
-* Makes
+This step is done every day before the market opens.
+
+* `Base` model for options comprising:
+  - underlyings with price and iv
+  - underlying OHLCs
+  - option chains
+
+* `Opts` generation
+  - qualified options for all dtes
+
+* `Price` model for qualified options
+
+  - When market is closed:
+	- `last` price and `iv` from mktData
+	- `bid` and `ask` will usually be `-1.0`
+	- `Selective bid-ask` from histData
+
+  - When market is open
+    -  `bid`, `ask`, `last` and `iv` from mktData
+
+* `Margin` model for all qualified options
+
+* For **SNP**:
   - `covers` for covered calls and puts SELLs
-  - `defends` for defending existing positions BUYs
+  - `defends` for defending existing underlying positions BUYs
   - `orphans` for orphaned defenses
-  - `harvests` for matured options
 
 <ins>Note</ins>
 * Build uses functions from engine.py and support.py
-* `base` model can be built on **`PAPER`** account
-* `covers`, `defends`, `orophans` and `harvests` are to be done on a **`LIVE`** account
+* `base` and `opts` can be built on **`PAPER`** account
+* `price`could be either **`LIVE`** or **`PAPER`** accounts
+* `covers`, `defends`, `orphans`, `harvests` and `protects` are to be done on a **`LIVE`** account
+  - the sd limits for these are based on YAML configurations set
 
 ## Confirm
 
-* Visualize and evaluate OHLC unds and options
 * Evaluate overall Positions, P&L and Risk scenarios 
 * Adjust YAML parameters
-* Deep-dive on specific symbols
-* Order 
+
+* Extract `nakeds` based on strategy, like:
+  - based on var.yml: CALLSTDMULT and PUTSTDMULT
+  - 4-35 days
+  - remq based quantities
+  - fixed rom
+  - honoring direction based on 14-day RSI
+  - honoring overall margin cushion
+
+* Do sample checks on nakeds
+  - with OHLC visualization for unds and options
+  - Deep-dive on specific symbols
+
+* Order
+  * For SNP:
+	- `nakeds`, `harvests`, `protects` - for options
+	- `covers` and `defends` - for assigned stocks 
+  * For NSE:
+    - `nakeds`, `harvests`, `protects` - for options
 
 ## Monitor
 
-* Breaches
-* Orders and Fills
-	- Dynamic price modification upon fill
-* Positions 
-	- with Status (balanced, orphaned, uncovered, undefended, dodos, unharvested)
-	- for Risk: Reward
+* Overall margin limit situation agains breach limit
+
+* For each **symbol**
+	- Status (balanced/orphaned/uncovered/undefended/dodos/unharvested)
+	- Margin situation against breach limit
+	- Risk / Reward on overall positions for the symbol
+	- Probability of profit (prop) for the overall positions of the symbol 
+	- Open orders
+
+* Dynamic price modificiation of open orders upon a `fill`
+
 * System health
 
 # Core Functions
@@ -90,12 +174,13 @@ Generates remaining quantities `remq` based on individual and overall position
 * Computes remaining quantities based on each gross position
 * Builds statuses from portfolio:
 	* Statuses are: `partial`, `nakeds`, `orphans`, `uncovered`, `undefended`, `dodos`, `balanced` and `harvest`
+		* Note: `harvest` includes `protects`
 
 ## 3. NAKEDS FUNCTION:
 
 Runs independently on `clientID = 0`
 
-* run `dfrq`
+* runs `dfrq`
 
 * determines standard deviations from YAML settings
 	* removes `blacklists`
@@ -124,7 +209,7 @@ Runs independently on `clientID = 0`
 	
 	
 ## 6. DEFEND FUNCTION
-* For the undefended and inadequately defended
+* For the undefended and inadequately defended underlying positions
 
 
 ## 7. # TODO: HARVEST FUNCTION
@@ -195,6 +280,9 @@ Edit `C:\Jts\tws.vmoptions` file to adjust the heapsize as shown in the picture 
 
 Refer [to this link](https://www.interactivebrokers.com/en/software/tws/usersguidebook/priceriskanalytics/custommemory.htm) for more details.
 
+### e. `ddedll.dll file error` prevention
+* Install 32-bit IB Gateway, instead of 64-bit in Windows 10
+
 ## 2. Jupyter Lab
 
 ### Set up Jupyter to start in the folder of choice
@@ -206,6 +294,14 @@ Refer [to this link](https://www.interactivebrokers.com/en/software/tws/usersgui
 
 ### Extensions installed
 * [Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python)
+* [Pylance](https://marketplace.visualstudio.com/items?itemName=ms-python.vscode-pylance)
+	- For good linting, including unused imports, set *settings.json* to:  
+		```
+		...
+		"python.linting.pylintEnabled": true,
+		"python.linting.enabled": true,
+		"python.languageServer": "Pylance"
+		...
 * [Juypter](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter)
 * [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments) - for colour-coding comments
 * [Markdown Peview Enhanced](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) - also supports mermaid!

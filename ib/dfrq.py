@@ -80,7 +80,7 @@ def get_dfrq(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
                     TIMEOUT=5,
                     post_process=post_df,
                     OP_FILENAME="",
-                    **{"FILL_DELAY": 5},
+                    **{"FILL_DELAY": 6.5},
                 )
             )
 
@@ -121,7 +121,6 @@ def get_dfrq(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
     df_gp = df_pf.groupby("symbol").grosspos.apply(sum).sort_values(ascending=False)
 
     # .get lotmap from df_unds
-
     lotmap = df_symlots[["symbol", "lot"]].set_index("symbol").to_dict("dict")["lot"]
     s_gross = df_unds.close * df_unds.symbol.map(lotmap)
 
@@ -137,7 +136,10 @@ def get_dfrq(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
         "grosspos", ascending=False
     )
 
-    MAX_GROSSPOS = max(s_gross) if MARKET == "NSE" else s_gross.quantile(0.8)
+    # Maximum gross position is computed based on undPrice * lot
+    # ... Typically should be about 35K across the whole market for SNP
+    # ... Having MAX_GROSS as max(s_gross) gives AMZN with over 330K USD!
+    MAX_GROSSPOS = s_gross.quantile(0.9) if MARKET == "NSE" else s_gross.quantile(0.8)
 
     # .compute remaining quantities from MAX_GROSSPOS
     remq = (MAX_GROSSPOS - dfrq.grosspos.fillna(0)) / (dfrq.undPrice * dfrq.lot)

@@ -17,9 +17,11 @@ log/*.*
 **/z*.*
 Untitled*.*
 ib/data/**/*.*
+ib/Pip*.*
 
 # ... don't ignore
 !ib/data/**/.keep
 !ib/data/template/*.*
 !ib/data/img/*.*
+
 

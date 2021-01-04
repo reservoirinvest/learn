@@ -20,6 +20,7 @@ scrip: pd.DataFrame = all_opts(scrip)
   - scrip.ask: float
   - scrip.price: float
   - scrip.price_time: datetime.datetime
+  - scrip.rsi: float
 
 **FUNCTIONS**: dfrq(), pnl(), 
 
@@ -55,6 +56,7 @@ scrip.opts : pd.DataFrame
   - scrip.opt.rom: float
   - scrip.opt.expPrice: float
   - scrip.opt.expRom: float
+  - scrip.opt.fallrise: tuple
   
   - scrip.best_opt: pd.DataFrame = scrip.opt.get_best(dte | nearest_dte)
 

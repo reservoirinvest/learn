@@ -55,15 +55,19 @@ async def ohlc(ib: IB,
     if isinstance(c, tuple):
         c = c[0]
 
-    if c.secType == "OPT":
+    """if c.secType == "OPT":   # For options
         DUR = "10 D"
         BAR_SIZE = "8 hours"
         WHAT_TO_SHOW = "MIDPOINT"
 
-    else:  # For options and futures
+    else:
         DUR = str(DURATION) + " D"
         BAR_SIZE = "1 day"
-        WHAT_TO_SHOW = "TRADES"
+        WHAT_TO_SHOW = "TRADES"""
+
+    DUR = str(DURATION) + " D"
+    BAR_SIZE = "1 day"
+    WHAT_TO_SHOW = "TRADES"
 
     ohlc = await ib.reqHistoricalDataAsync(
         contract=c,
@@ -1074,6 +1078,8 @@ def get_unds(MARKET: str,
         df_und_margins[["conId", "margin",
                         "comm"]].set_index("conId")).reset_index())
 
+    df_unds = df_unds[df_unds.undPrice.notna()] # Remove unds without undPrice
+
     if OP_FILENAME:
         df_unds.to_pickle(DATAPATH.joinpath("df_unds.pkl"))
 
@@ -1775,6 +1781,10 @@ def get_opts(MARKET: str, OP_FILENAME: str = "df_opts.pkl") -> pd.DataFrame:
     # . update null iv with und_iv
     m_iv = df_opts.iv.isnull()
     df_opts.loc[m_iv, "iv"] = df_opts[m_iv].und_iv
+
+    # . remove null undPrice OR null iv
+    m_uiv = df_opts.undPrice.isnull() | df_opts.iv.isnull()
+    df_opts = df_opts[~m_uiv]   
 
     # . update calculated sd mult for strike and its probability
     df_opts.insert(19, "sdMult", calcsdmult_df(df_opts.strike, df_opts))

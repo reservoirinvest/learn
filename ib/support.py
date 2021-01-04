@@ -7,13 +7,14 @@ import os
 import pathlib
 import re
 import time
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from typing import List, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import ta
 import yaml
-from ib_insync import IB, Stock, util, Contract
+from ib_insync import IB, Contract, Stock, util
 from pytz import timezone
 from scipy.integrate import quad
 from tqdm import tqdm
@@ -136,6 +137,7 @@ def empty_trash(MARKET: str):
         "df_unds.pkl",
         "df_chains.pkl",
         "df_ohlcs.pkl",
+        "df_opts.pkl"
     ]
 
     data_fs = os.listdir(DATAPATH)
@@ -160,13 +162,13 @@ def empty_trash(MARKET: str):
 
 
 def fallrise(df_hist, dte):
-    """Gets the fall and rise for a specific dte
+    """Gets the fall and rise for a specific symbol and dte
 
     Args:
         (df_hist) as a df with historical ohlc for a scrip
         (dte) as int for days to expiry
     Returns:
-        {dte: {'fall': fall, 'rise': rise}} as a dictionary of floats"""
+        symbol named tuple(symbol, dte, fall, rise)"""
 
     s = df_hist.symbol.unique()[0]
     df = df_hist.set_index("date").sort_index(ascending=True)
@@ -175,11 +177,43 @@ def fallrise(df_hist, dte):
         pctchange=df.close.pct_change(periods=dte),
     )
 
-    df1 = df.sort_index(ascending=False)
-    max_fall = df1[df1.pctchange <= 0].delta.max()
-    max_rise = df1[df1.pctchange > 0].delta.max()
+    max_fall = df[df.pctchange <= 0].delta.max()
+    max_rise = df[df.pctchange > 0].delta.max()
+    
+    fallrise = namedtuple(s, ['symbol', 'dte', 'fall', 'rise'])
+    res = fallrise(symbol=s, dte=dte, fall=round(max_fall, 2), rise=round(max_rise, 2))
 
-    return (s, dte, max_fall, max_rise)
+    return res
+
+
+def get_col_widths(dataframe):
+    """Provide column widths for `auto-fitting` pandas dataframe"""
+
+    widths = [
+        max([
+            len(str(round(s, 2))) if isinstance(s, float) else len(str(s))
+            for s in dataframe[col].values
+        ] + [len(col) * 1.2]) for col in dataframe.columns
+    ]
+
+    return widths
+
+
+def get_dte(dt):
+    """Gets days to expiry
+
+    Arg:
+        (dt) as day in string format 'yyyymmdd'
+    Returns:
+        days to expiry as int"""
+
+    try:
+        dte = (util.parseIBDatetime(dt) -
+               datetime.datetime.utcnow().date()).days
+    except Exception:
+        dte = None
+
+    return dte
 
 
 def get_market(msg: str = "") -> str:
@@ -205,23 +239,6 @@ def get_market(msg: str = "") -> str:
             break  # success and exit loop
 
     return MARKET
-
-
-def get_dte(dt):
-    """Gets days to expiry
-
-    Arg:
-        (dt) as day in string format 'yyyymmdd'
-    Returns:
-        days to expiry as int"""
-
-    try:
-        dte = (util.parseIBDatetime(dt) -
-               datetime.datetime.utcnow().date()).days
-    except Exception:
-        dte = None
-
-    return dte
 
 
 def get_openorders(MARKET: str) -> pd.DataFrame:
@@ -362,18 +379,18 @@ def get_prob(sd):
     prob = quad(lambda x: np.exp(-(x**2) / 2) / np.sqrt(2 * np.pi), -sd, sd)[0]
     return prob
 
-
-def get_col_widths(dataframe):
-    """Provide column widths for `auto-fitting` pandas dataframe"""
-
-    widths = [
-        max([
-            len(str(round(s, 2))) if isinstance(s, float) else len(str(s))
-            for s in dataframe[col].values
-        ] + [len(col) * 1.2]) for col in dataframe.columns
-    ]
-
-    return widths
+def get_rsi(df_ohlcs: pd.DataFrame, # df with ascending series of close,
+            days: int=14, # no of days for the rsi
+           ):
+    
+    if len(df_ohlcs.symbol.unique()) > 1:
+        df = df_ohlcs.set_index('date').sort_index(ascending=True)
+        df = df.groupby('symbol').close.apply(lambda x: ta.momentum.RSIIndicator(close=x, window=14).rsi().iloc[-1])
+        rsi = df.rename('rsi')
+    else:
+        rsi = ta.momentum.RSIIndicator(close=df_ohlcs.close,  window=days).rsi().iloc[-1]
+        
+    return rsi
 
 
 async def isMarketOpen(ib: IB, MARKET: str) -> bool:

@@ -1,0 +1,20 @@
+# Deep dive function
+
+Inputs: SYMBOL, TARGET_DTE, RUN_ON_PAPER, SAVE
+
+Tasks:
+* Get unds
+* Get the chains (try from pickle, else generate)
+* Identify options with dte closest to the target
+* Remove options with intrinsic value
+* Generate opts
+* Qualify opts
+* Get opts prices
+* Get opts margins
+
+* Get opts ohlcs
+
+* Make df_opts for the symbol and expiry (SYMBOL_MMDD e.g. NIFTY50_0128)
+* Add opts ohlcs to it
+
+* Pickle

@@ -2,7 +2,6 @@
 
 # ** SETUP
 # .Imports
-import math
 import os
 import pathlib
 
@@ -12,18 +11,8 @@ from ib_insync import IB, MarketOrder, util
 
 from dfrq import get_dfrq
 from engine import executeAsync, get_unds, margin, post_df, price
-from support import (
-    Timer,
-    Vars,
-    calcsdmult_df,
-    fallrise,
-    get_col_widths,
-    get_dte,
-    get_market,
-    get_prec,
-    get_prob,
-    yes_or_no,
-)
+from support import (Timer, Vars, calcsdmult_df, fallrise, get_col_widths,
+                     get_dte, get_market, get_prec, get_prob, yes_or_no)
 
 # Set pandas display format
 pd.options.display.float_format = "{:,.2f}".format
@@ -162,6 +151,17 @@ def get_nakeds(
 
     sym_dtes = df_opts.groupby("symbol").dte.unique().to_dict()
 
+    fr = []
+    for k, v in sym_dtes.items():
+        for d in v:
+            try:
+                fr.append(fallrise(df_hist=df_ohlcs[df_ohlcs.symbol == k], dte=d))
+            except IndexError:
+                pass
+
+    df_fr = pd.DataFrame(fr)
+
+    """ # not using named tuple!
     fr = [
         fallrise(df_hist=df_ohlcs[df_ohlcs.symbol == k], dte=d)
         for k, v in sym_dtes.items()
@@ -169,7 +169,7 @@ def get_nakeds(
     ]
     df_fr = pd.DataFrame(fr).rename(
         columns={0: "symbol", 1: "dte", 2: "rise", 3: "fall"}
-    )
+    ) """
 
     # . integrate fallrise df with undPrice
     df_fr1 = (
