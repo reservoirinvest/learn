@@ -1,26 +1,31 @@
 # ** SETUP
+
+# Prevent spurious problems for try...
+# pyright: reportUnboundVariable=false
+
 # .Imports
 
 import asyncio
-import datetime
 import math
 import os
 import pathlib
+from collections import defaultdict, namedtuple
+from datetime import datetime
 from io import StringIO
 from typing import Callable, Coroutine, Union
 
-import IPython as ipy
 import numpy as np
 import pandas as pd
 import requests
 from ib_insync import IB, Contract, MarketOrder, Option, util
 from tqdm import tqdm
 
-from support import Timer, Vars, calcsdmult_df, get_dte, get_prob, quick_pf, yes_or_no
+from opts import make_opts
+from support import (Timer, Vars, calcsdmult_df, get_dte, get_prob, quick_pf,
+                     yes_or_no)
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 BAR_FORMAT = "{desc:<10}{percentage:3.0f}%|{bar:25}{r_bar}{bar:-10b}"
-
 
 # ** SINGLE FUNCTIONS
 # * Independent functions - ready to be called.
@@ -47,7 +52,9 @@ async def qualify(ib: IB, c: Union[pd.Series, list, tuple,
 # .OHLC
 async def ohlc(ib: IB,
                c,
+               WHAT_TO_SHOW: str = 'TRADES',
                DURATION: int = 365,
+               BAR_SIZE = "1 day",
                OHLC_DELAY: int = 5) -> pd.DataFrame:
 
     "Gets OHLC history for stocks / options in UTC date"
@@ -55,23 +62,11 @@ async def ohlc(ib: IB,
     if isinstance(c, tuple):
         c = c[0]
 
-    """if c.secType == "OPT":   # For options
-        DUR = "10 D"
-        BAR_SIZE = "8 hours"
-        WHAT_TO_SHOW = "MIDPOINT"
-
-    else:
-        DUR = str(DURATION) + " D"
-        BAR_SIZE = "1 day"
-        WHAT_TO_SHOW = "TRADES"""
-
     DUR = str(DURATION) + " D"
-    BAR_SIZE = "1 day"
-    WHAT_TO_SHOW = "TRADES"
 
     ohlc = await ib.reqHistoricalDataAsync(
         contract=c,
-        endDateTime=datetime.datetime.now(),
+        endDateTime=datetime.now(),
         durationStr=DUR,
         barSizeSetting=BAR_SIZE,
         whatToShow=WHAT_TO_SHOW,
@@ -82,13 +77,19 @@ async def ohlc(ib: IB,
     df = util.df(ohlc)
 
     # re-cast OHLC for options
-    if c.secType == "OPT":
-
-        # Introduce date without time
-        df["dt"] = df["date"].dt.date
+    if WHAT_TO_SHOW == 'BID_ASK':
 
         # get the grouped values for the option
-        g = df.groupby("dt")
+        try:
+            g = df.groupby("date")
+        except AttributeError:
+            df = pd.DataFrame({'date': pd.NaT, 'conId': c.conId, 
+                               'symbol': c.symbol, 'localSymbol': c.localSymbol, 
+                               'strike': c.strike, 'right': c.right, 
+                               'expiry': c.lastTradeDateOrContractMonth, 
+                               'bid': np.nan, 'ask': np.nan}, index=range(1))
+            
+            return df # !!! ABORTED OHLC
 
         op = g.open.first()
         hi = g.high.max()
@@ -98,7 +99,7 @@ async def ohlc(ib: IB,
         avg = g.average.mean()
         bc = g.barCount.sum()
 
-        df1 = pd.DataFrame({"date": df.dt.unique()})
+        df1 = pd.DataFrame({"date": df.date.unique()})
 
         df = df1.assign(
             open=df1["date"].map(op),
@@ -109,6 +110,10 @@ async def ohlc(ib: IB,
             average=df1["date"].map(avg),
             barCount=df1["date"].map(bc),
         )
+        
+        df = df.drop(['open', 'close', 'average', 'barCount', 'volume'], 1)
+        df.rename(columns={'high': 'ask', 'low': 'bid'}, 
+                            inplace=True)
 
         df.insert(0, "localSymbol", c.localSymbol)
         df.insert(1, "strike", c.strike)
@@ -338,6 +343,92 @@ async def price(ib: IB, co, **kwargs) -> pd.DataFrame:
 
     return df
 
+
+async def qpCoro(ib: IB, contract: Contract, **kwargs) -> pd.DataFrame:
+    """Coroutine for quick price from market | history"""
+
+    try:
+        FILL_DELAY = kwargs["FILL_DELAY"]
+    except KeyError as ke:
+        print(
+            f"\nWarning: No FILL_DELAY supplied! 5.5 second default is taken\n"
+        )
+        FILL_DELAY = 5.5
+    
+    if isinstance(contract, tuple):
+        contract = contract[0]
+    
+    df_mktpr = await price(ib, contract, **kwargs)
+    
+    async def histCoro():
+        
+        result = defaultdict(dict)
+        
+        try:
+            ticks = await asyncio.wait_for(ib.reqHistoricalTicksAsync(
+                            contract=contract,
+                            startDateTime="",
+                            endDateTime=datetime.now(),
+                            numberOfTicks=1,
+                            whatToShow="Bid_Ask",
+                            useRth=False,
+                            ignoreSize=False), timeout=None)
+
+        except asyncio.TimeoutError:
+            tick = namedtuple('tick', ['time', 'priceBid', 'priceAsk'])
+            ticks = [tick(time=pd.NaT, priceBid=np.nan, priceAsk=np.nan)]
+
+        # extract bid and ask price, if available!
+        try:
+            bid_ask = ticks[-1]  # bid ask is not availble for Index securities!
+            result["bid"] = bid_ask.priceBid
+            result["ask"] = bid_ask.priceAsk
+            result["batime"] = bid_ask.time
+
+        except IndexError:
+            result["bid"] = np.nan
+            result["ask"] = np.nan
+            result["batime"] = pd.NaT
+        
+        return result
+    
+    # bid/ask with -1.0 as market is not open
+    if (df_mktpr.bid.iloc[0] == -1.0) or (df_mktpr.ask.iloc[0] == -1.0):
+        result = await histCoro()
+        
+        df_pr = df_mktpr.assign(batime = result['batime'],
+                    bid = result['bid'],
+                    ask = result['ask'])
+    else:
+        df_mktpr['batime'] = df_mktpr['time']
+        df_pr = df_mktpr
+        
+    # use bid-ask avg if last price is not available
+    df_pr = df_pr.assign(price=df_pr["last"]\
+                 .combine_first(df_pr[["bid", "ask"]]\
+                 .mean(axis=1)))
+    
+    df_pr = df_pr.sort_values(['right', 'strike'], ascending=[True, False])
+    
+    return df_pr
+
+async def qpAsync(ib:IB, contracts, **kwargs) -> pd.DataFrame:
+    """Quick Price with bid-ask for a number of contracts"""
+    
+    if hasattr(contracts, '__iter__'):
+        tasks = [qpCoro(ib=ib, contract=contract, **kwargs) for contract in contracts]
+    else:
+        tasks = [qpCoro(ib=ib, contract=contracts, **kwargs)]
+        
+    df_prs = [await res for res in tqdm(asyncio.as_completed(tasks), 
+                      desc=f"opt price:",
+                      bar_format=BAR_FORMAT,
+                      ncols=80,
+                      total=len(tasks))]
+
+    df = pd.concat(df_prs, ignore_index=True)
+
+    return df
 
 # .Margin coroutine
 async def margin(ib: IB, co, **kwargs) -> pd.DataFrame:
@@ -710,7 +801,7 @@ def get_nse() -> pd.DataFrame:
     except pd.errors.ParserError as e:
         print(f"Parser Error {e}")
 
-    df_symlots = df_symlots[list(df_symlots)[1:5]]
+    df_symlots = df_symlots[list(df_symlots)[1:5]] 
 
     # strip whitespace from columns and make it lower case
     df_symlots.columns = df_symlots.columns.str.strip().str.lower()
@@ -1036,6 +1127,9 @@ def get_unds(MARKET: str,
         DLY = 5
 
     with IB().connect(HOST, PORT, CID) as ib:
+
+        ib.client.setConnectOptions('PACEAPI')
+
         df_unds = ib.run(
             executeAsync(
                 ib=ib,
@@ -1065,11 +1159,11 @@ def get_unds(MARKET: str,
                 algo=margin,
                 cts=und_cos,
                 CONCURRENT=200,
-                TIMEOUT=5.5,
+                TIMEOUT=15,
                 post_process=post_df,
                 DATAPATH=DATAPATH,
                 OP_FILENAME="",
-                **{"FILL_DELAY": 5.5},
+                **{"FILL_DELAY": 14.5},
             ))
 
     df_und_margins[["conId", "margin", "comm"]]
@@ -1695,142 +1789,3 @@ def opt_margins(
     opt_margin_time.stop()
 
     return df_opt_margins
-
-
-# . build the options
-def get_opts(MARKET: str, OP_FILENAME: str = "df_opts.pkl") -> pd.DataFrame:
-    """Note: output df will have price / margin as NaN, if df_prices.pkl / df_margins.pkl are not present"""
-    DATAPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", MARKET.lower())
-    TEMPL_PATH = pathlib.Path.cwd().joinpath("data", "template")
-
-    df_opts_time = Timer(f"{MARKET} df_opts build")
-    df_opts_time.start()
-
-    # * LOAD FILES
-    qopts = pd.read_pickle(DATAPATH.joinpath("qopts.pkl"))
-    df_chains = pd.read_pickle(DATAPATH.joinpath("df_chains.pkl"))
-    df_unds = pd.read_pickle(DATAPATH.joinpath("df_unds.pkl"))
-
-    # * STAGE PRICE AND MARGIN
-    try:
-        df_opt_prices = pd.read_pickle(DATAPATH.joinpath("df_opt_prices.pkl"))
-    except FileNotFoundError:
-        df_opt_prices = pd.read_pickle(TEMPL_PATH.joinpath("df_price.pkl"))
-
-    try:
-        df_opt_margins = pd.read_pickle(
-            DATAPATH.joinpath("df_opt_margins.pkl"))
-    except FileNotFoundError:
-        df_opt_margins = pd.read_pickle(TEMPL_PATH.joinpath("df_margin.pkl"))
-
-    try:
-        df_opt_prices1 = pd.read_pickle(
-            DATAPATH.joinpath("z_temp_" + "df_opt_prices.pkl"))
-    except FileNotFoundError:
-        df_opt_prices1 = pd.read_pickle(TEMPL_PATH.joinpath("df_price.pkl"))
-
-    try:
-        df_opt_margins1 = pd.read_pickle(
-            DATAPATH.joinpath("z_temp_" + "df_opt_margins.pkl"))
-    except FileNotFoundError:
-        df_opt_margins1 = pd.read_pickle(TEMPL_PATH.joinpath("df_margin.pkl"))
-
-    # ... concatenate and cleanup
-    df_opt_prices = (pd.concat(
-        [df_opt_prices, df_opt_prices1],
-        ignore_index=True).dropna(subset=["price"]).drop_duplicates(
-            ["conId"], keep="last").reset_index(drop=True))
-
-    df_opt_margins = (pd.concat(
-        [df_opt_margins, df_opt_margins1],
-        ignore_index=True).dropna(subset=["margin"]).drop_duplicates(
-            ["conId"], keep="last").reset_index(drop=True))
-
-    # * BUILD DF OPTION
-    df_opts = (util.df(qopts.to_list()).iloc[:, :6].assign(
-        contract=qopts).rename(columns={
-            "lastTradeDateOrContractMonth": "expiry"
-        }).drop_duplicates())
-
-    # ... integrate lots (from chains), und_iv  and undPrice
-    col1 = ["symbol", "strike", "expiry"]
-    df_opts = (df_opts.set_index(col1).join(
-        df_chains.set_index(col1)[["lot"]]).reset_index())
-
-    # ... process dtes
-    df_opts["dte"] = df_opts.expiry.apply(get_dte)
-    df_opts = df_opts[df_opts.dte > 0]  # Remove negative dtes
-
-    # Make 0 dte positive to avoid sqrt errors
-    df_opts.loc[df_opts.dte == 0, "dte"] = 1
-
-    df_opts["und_iv"] = df_opts.symbol.map(
-        df_unds.set_index("symbol").iv.to_dict())
-    df_opts["undPrice"] = df_opts.symbol.map(
-        df_unds.set_index("symbol").undPrice.to_dict())
-
-    # . integrate price, iv and margin
-    df_opts = (df_opts.set_index("conId").join(
-        df_opt_prices.set_index("conId")[[
-            "bid", "ask", "close", "last", "iv", "price"
-        ]]).join(df_opt_margins.set_index("conId")[["comm",
-                                                    "margin"]]).reset_index())
-
-    # * GET VALUES, LOTS, ROM AND SORT BY ROM
-
-    # . update null iv with und_iv
-    m_iv = df_opts.iv.isnull()
-    df_opts.loc[m_iv, "iv"] = df_opts[m_iv].und_iv
-
-    # . remove null undPrice OR null iv
-    m_uiv = df_opts.undPrice.isnull() | df_opts.iv.isnull()
-    df_opts = df_opts[~m_uiv]   
-
-    # . update calculated sd mult for strike and its probability
-    df_opts.insert(19, "sdMult", calcsdmult_df(df_opts.strike, df_opts))
-    df_opts.insert(19, "prob", df_opts.sdMult.apply(get_prob))
-
-    # . put the order quantity
-    df_opts["qty"] = 1 if MARKET == "SNP" else df_opts.lot
-
-    # . fill empty commissions
-    if MARKET == "NSE":
-        commission = 20.0
-    else:
-        commission = 2.0
-
-    df_opts["comm"].fillna(value=commission, inplace=True)
-
-    # ... add intrinsic and time values
-    df_opts = df_opts.assign(intrinsic=np.where(
-        df_opts.right == "C",
-        (df_opts.undPrice - df_opts.strike).clip(0, None),
-        (df_opts.strike - df_opts.undPrice).clip(0, None),
-    ))
-    df_opts = df_opts.assign(timevalue=df_opts.price - df_opts.intrinsic)
-
-    # . compute rom based on timevalue and down-sort on it
-    df_opts["rom"] = (
-        (df_opts.timevalue * df_opts.lot - df_opts.comm).clip(0) /
-        df_opts.margin * 365 / df_opts.dte)
-
-    df_opts = df_opts.sort_values("rom", ascending=False)
-
-    # . drop duplicates
-    df_opts = df_opts.drop_duplicates(keep="last").reset_index(drop=True)
-
-    df_opts.to_pickle(DATAPATH.joinpath(OP_FILENAME))
-
-    df_opts_time.stop()
-
-    return df_opts
-
-
-# !!! TEMPORARY - Testing OHLC
-if __name__ == "__main__":
-
-    MARKET = "NSE"
-
-    optspath = r"./ib/data/" + MARKET.lower() + r"/df_opts.pkl"
-
-    df_opts = pd.read_pickle(optspath)

@@ -26,7 +26,7 @@ NSE:
   PORT: 3000
   PAPER: 3001 # For paper trades in IBG
   MINDTE: 1
-  MAXDTE: 50
+  MAXDTE: 60
   CUSHION_LIMIT: 0.15 # Cushion should be greater than the cushion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
   MARGIN_LIMIT: 0.7 # Initial margin should not be greater than 90% of NLV
   POSN_LIMIT: 0.18 # Each symbol's market value should not be greater than 18% of NLV

@@ -103,6 +103,17 @@ def calcsdmult_df(price, df):
     return abs(sdevmult)
 
 
+def clean(s):
+    """Cleans python string to make it an identifier"""
+
+    # Remove invalid characters
+    s = re.sub('[^0-9a-zA-Z_]', '', s)
+
+    # Remove leading characters until we find a letter or underscore
+    s = re.sub('^[^a-zA-Z_]+', '', s)
+
+    return s
+
 def calcsd(price, undPrice, dte, iv):
     """Calculate standard deviation MULTIPLE for given price.
 
@@ -180,8 +191,10 @@ def fallrise(df_hist, dte):
     max_fall = df[df.pctchange <= 0].delta.max()
     max_rise = df[df.pctchange > 0].delta.max()
     
-    fallrise = namedtuple(s, ['symbol', 'dte', 'fall', 'rise'])
-    res = fallrise(symbol=s, dte=dte, fall=round(max_fall, 2), rise=round(max_rise, 2))
+    fallrise = namedtuple(clean(s), ['symbol', 'dte', 'fall', 'rise'])
+    res = fallrise(symbol=s, dte=dte, 
+                    fall=round(max_fall, 2), 
+                    rise=round(max_rise, 2))
 
     return res
 
@@ -258,7 +271,7 @@ def get_openorders(MARKET: str) -> pd.DataFrame:
     # ... set parameters from var.yml
     ibp = Vars(MARKET.upper())
 
-    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.MASTERCID
+    HOST, PORT, CID = ibp.HOST, ibp.PORT, ibp.CID
     ACTIVE_STATUS = ibp.ACTIVE_STATUS
 
     # .. initialize openorder dataframe from template
@@ -506,79 +519,6 @@ def quick_pf(ib) -> pd.DataFrame:
         df_pf = pd.read_pickle(TEMPL_PATH.joinpath("df_portfolio.pkl"))
 
     return df_pf
-
-
-async def quick_price_async(ib: IB, contract: Contract) -> pd.DataFrame:
-
-    # Check for executeAsync engine
-    if isinstance(contract, tuple):
-        contract = contract[0]
-
-    result = defaultdict(dict)
-
-    ticks = await asyncio.gather(
-        ib.reqHistoricalTicksAsync(
-            contract=contract,
-            startDateTime="",
-            endDateTime=datetime.datetime.now(),
-            numberOfTicks=1,
-            whatToShow="Bid_Ask",
-            useRth=False,
-            ignoreSize=False,
-        ),
-        ib.reqHistoricalTicksAsync(
-            contract=contract,
-            startDateTime="",
-            endDateTime=datetime.datetime.now(),
-            numberOfTicks=1,
-            whatToShow="Trades",
-            useRth=False,
-            ignoreSize=False,
-        ),
-    )
-
-    # extract bid and ask price
-    try:
-        bid_ask = ticks[0][-1]  # bid ask is not availble for Index securities!
-        result["bid"] = bid_ask.priceBid
-        result["ask"] = bid_ask.priceAsk
-
-    except IndexError:
-        print(
-            f"\nNo bid-ask for {contract.localSymbol} of secType: {contract.secType}"
-        )
-        result["bid"] = np.nan
-        result["ask"] = np.nan
-
-    # extract last reported price
-    try:
-        # pick reported price if available
-        result["last"] = [
-            t.price for t in ticks[1] if not t.tickAttribLast.unreported
-        ][-1]
-    except IndexError:
-        # pick up last tick price
-
-        try:
-            result["last"] = ticks[1][-1].price
-        except IndexError:
-            result["last"] = np.nan
-
-    # . build the df
-    df_pr = pd.DataFrame([
-        pd.Series(contract.conId, name="conId"),
-        pd.Series(contract.symbol, name="symbol"),
-        pd.Series(contract.localSymbol, name="localSymbol"),
-        pd.Series(result["bid"], name="bid", dtype="float64"),
-        pd.Series(result["ask"], name="ask", dtype="float64"),
-        pd.Series(result["last"], name="last", dtype="float64"),
-    ]).T
-
-    # . use bid-ask avg if last price is not available
-    df_pr = df_pr.assign(
-        price=df_pr["last"].combine_first(df_pr[["bid", "ask"]].mean(axis=1)))
-
-    return df_pr
 
 
 def watchlist(MARKET: str,

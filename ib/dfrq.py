@@ -71,6 +71,9 @@ def get_dfrq(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
 
         # .get margins
         with IB().connect(HOST, PORT, CID) as ib:
+
+            ib.client.setConnectOptions('PACEAPI')
+
             df_pfm = ib.run(
                 executeAsync(
                     ib=ib,
@@ -80,7 +83,7 @@ def get_dfrq(MARKET: str, RUN_ON_PAPER: bool = False) -> pd.DataFrame:
                     TIMEOUT=5,
                     post_process=post_df,
                     OP_FILENAME="",
-                    **{"FILL_DELAY": 6.5},
+                    **{"FILL_DELAY": 10},
                 )
             )
 

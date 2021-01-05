@@ -1,33 +1,54 @@
 # Builds base data
+
+# Prevent spurious problems for try...
+# pyright: reportUnboundVariable=false
+
 import os
 import pathlib
 
 import pandas as pd
-
 from ib_insync import util
 
-from engine import (
-    get_chains,
-    get_ohlcs,
-    get_opts,
-    get_symlots,
-    get_unds,
-    opt_margins,
-    opt_prices,
-    qualify_opts,
-)
+from engine import get_chains, get_ohlcs, get_symlots, get_unds
+from opts import make_opts
 from support import Timer, empty_trash, get_market, yes_or_no
 
 # get the market
 MARKET = get_market()
 
+# Initialize
+RUN_BASE = RUN_QUALIFY = NO_ACTION = False
+
 # .. start the timer
 all_time = Timer("Base")
 all_time.start()
 
-RUN_ALL = yes_or_no(f"\n Run ALL base for {MARKET}? ")
+RUN_ALL = yes_or_no(f"\n Run ALL for {MARKET}?: ")
 
-DELETE_FILES = yes_or_no(f"\n Delete previous pickles and xlsx? ")
+if RUN_ALL:
+    RUN_BASE = RUN_QUALIFY = True
+    RUN_ON_PAPER = yes_or_no(f"\n Run ALL on paper for {MARKET}?: ")
+
+else:
+    RUN_BASE = yes_or_no(f"\n Run ONLY base for {MARKET}?: ")
+
+    if RUN_BASE:
+        RUN_ON_PAPER = yes_or_no(f"\n Build base on paper for {MARKET}?: ")
+    else:
+        RUN_QUALIFY = yes_or_no(f"\n Run ONLY qualify for {MARKET}?: ")
+
+        if RUN_QUALIFY:
+            RUN_ON_PAPER = yes_or_no(f"\n Qualify on paper for {MARKET}?: ")
+        else:
+            NO_ACTION = True
+
+if RUN_QUALIFY:
+    USE_YAML = yes_or_no(f"\n Use YAML settings to qualify for {MARKET}?: ")
+
+DELETE_FILES = yes_or_no(f"\n Delete previous pickles and xlsx?: ")
+
+if not DELETE_FILES and NO_ACTION:
+    print(f"\n\n... No action was chosen ...BYE...\n\n")
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
@@ -38,59 +59,8 @@ util.logToFile(path=LOGFILE, level=30)
 with open(LOGFILE, "w"):
     pass
 
-# Initialize
-RUN_BASE = False
-
 if DELETE_FILES:
     empty_trash(MARKET)
-
-if RUN_ALL:
-
-    RUN_BASE = RUN_QUALIFY = RUN_PRICE = RUN_MARGIN = FINAL_OPTS = True
-
-    RUN_ON_PAPER = yes_or_no(f"\n Build all base on paper for {MARKET}? ")
-    REUSE = yes_or_no(f"\n Reuse qualify, price and margin for {MARKET}? ")
-
-else:
-
-    RUN_QUALIFY = yes_or_no(f"\n Qualify opts? ")
-    RUN_PRICE = yes_or_no(f"\n Run price? ")
-    RUN_MARGIN = yes_or_no(f"\n Run margin? ")
-
-    if RUN_QUALIFY:
-
-        msg = "qualify"
-
-        if RUN_PRICE:
-            msg = "qualify and price"
-        elif RUN_MARGIN:
-            msg = "qualify and margin"
-        elif RUN_PRICE & RUN_MARGIN:
-            msg = "qualify, price and margin"
-    else:
-
-        msg = "price and margin"
-
-        if RUN_PRICE and not RUN_MARGIN:
-            msg = "price"
-
-        if RUN_MARGIN and not RUN_PRICE:
-            msg = "margin"
-
-    if RUN_QUALIFY | RUN_PRICE | RUN_MARGIN:
-        REUSE = yes_or_no(f"\n Reuse {msg} for {MARKET}? ")
-
-    FINAL_OPTS = yes_or_no(f"\n Assemble final df_opts for {MARKET}? ")
-
-    if RUN_QUALIFY:
-        RUN_ON_PAPER = yes_or_no(f"\n Qualify options for {MARKET} from PAPER? ")
-
-    if RUN_PRICE:
-        RUN_ON_PAPER = yes_or_no(f"\n Get option prices for {MARKET} from PAPER? ")
-
-    if RUN_MARGIN:
-        RUN_ON_PAPER = yes_or_no(f"\n Get option margins for {MARKET} from PAPER? ")
-
 
 # * ACT ON WHAT HAS BEEN SELECTED
 
@@ -106,35 +76,7 @@ if RUN_BASE:
     get_chains(MARKET=MARKET, und_cts=und_cts, RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
 
 if RUN_QUALIFY:
-    qualify_opts(
-        MARKET=MARKET,
-        BLK_SIZE=200,
-        RUN_ON_PAPER=RUN_ON_PAPER,
-        USE_YAML_DTE=True,
-        CHECKPOINT=True,
-        REUSE=REUSE,
-        OP_FILENAME="qopts.pkl",
-    )
-    if FINAL_OPTS:
-        get_opts(MARKET=MARKET, OP_FILENAME="df_opts.pkl")
+    df_opts = make_opts(MARKET, USE_YAML=USE_YAML, SAVE=True, RUN_ON_PAPER=RUN_ON_PAPER)
 
-
-if RUN_PRICE:
-    opt_prices(
-        MARKET=MARKET,
-        RUN_ON_PAPER=RUN_ON_PAPER,
-        REUSE=REUSE,
-        OP_FILENAME="df_opt_prices.pkl",
-    )
-
-if RUN_MARGIN:
-    opt_margins(
-        MARKET=MARKET,
-        RUN_ON_PAPER=RUN_ON_PAPER,
-        REUSE=REUSE,
-        OP_FILENAME="df_opt_margins.pkl",
-    )
-if FINAL_OPTS:
-    get_opts(MARKET=MARKET, OP_FILENAME="df_opts.pkl")
 
 all_time.stop()

@@ -2,23 +2,29 @@
 * [x] Build `opts.py` to qualify options from chains - reusing `opts.pkl`
 * [x] Include `14-day` rsi in df_opts
 * [x] Include `rise` and `fall` for dte in df_opts
-* [ ] make `opts.py` into a function
-* [ ] remove `get_opts` function from `nakeds.py` and `engine.py`
-* [ ] remove `get_price` and `get_margin` from `base.py`
+* [x] make `opts.py` into a function
+* [x] add `opts.py` to `base.py`
+* [x] remove `get_opts` function from `engine.py`
 
-* [ ] add `opts.py` to `base.py`
+* [x] Make `price` function for bid-ask-last prices robust
 
-* [ ] Add YAML `filter` selection for strategies
-
-* [ ] Make `price` function for bid-ask-last prices robust
-
-* [ ] remake `nakeds.py` picking up df_opts with price, margin and roms
-
-* [ ] make dataclasses
+* [x] remake `nakeds.py` picking up df_opts with price, margin and roms
+	* [ ] Add YAML `filter` selection for strategies
+	* [x] Use the robust `qpAsync` price
+	* [x] Get the margins
+	* [x] Compute rom and pop
+	* [x] Compute expected price
+	* [x] Pickle the nakeds
 
 * [ ] `Deep-dive` for a single option/dte combination
 	* [ ] Plot option and underlying OHLCs with standard deviations
 	* [ ] Sort by `best-trade` - a combo of Reward/Risk, rom and prop
+
+* [ ] Do `harvests` and `monitor`
+
+* [ ] remove `get_price` and `get_margin` from `base.py` after checking where used
+
+* [ ] make dataclasses
 
 # Introduction
 Set of programs for Interactive Brokers - <b>Trade Order Management System (TOMS)</b>
