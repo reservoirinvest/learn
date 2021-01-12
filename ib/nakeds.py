@@ -226,7 +226,7 @@ def get_nakeds(MARKET: str,
         df_puts = df_nakeds[df_nakeds.right == "P"].reset_index(drop=True)
 
         # ... initiate Excel writer object
-        writer = pd.ExcelWriter(datapath.joinpath(XL_FILE), engine="xlsxwriter")
+        writer = pd.ExcelWriter(datapath.joinpath(XL_FILE), engine="openpyxl")
 
         df_nakeds.to_excel(
             writer,

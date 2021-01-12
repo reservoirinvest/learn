@@ -414,11 +414,16 @@ async def qpCoro(ib: IB, contract: Contract, **kwargs) -> pd.DataFrame:
 
 async def qpAsync(ib:IB, contracts, **kwargs) -> pd.DataFrame:
     """Quick Price with bid-ask for a number of contracts"""
+
+    timeout=15
+    tasks=[]
     
     if hasattr(contracts, '__iter__'):
         tasks = [qpCoro(ib=ib, contract=contract, **kwargs) for contract in contracts]
     else:
-        tasks = [qpCoro(ib=ib, contract=contracts, **kwargs)]
+        for contract in contracts:
+            task = asyncio.wait_for(qpCoro(ib=ib, contract=contract, **kwargs), timeout)
+            tasks.append(task)
         
     df_prs = [await res for res in tqdm(asyncio.as_completed(tasks), 
                       desc=f"opt price:",
@@ -823,7 +828,9 @@ def get_nse() -> pd.DataFrame:
 
     # convert expiry to period
     df_symlots = df_symlots.assign(expiryM=pd.to_datetime(
-        df_symlots.expiryM, format="%b-%y").dt.to_period("M").astype("str"))
+        df_symlots.expiryM.apply(lambda x: x.title()), 
+                            format="%y-%b")\
+                                .dt.to_period("M").astype("str"))
 
     # convert lots to integers
     df_symlots = df_symlots.assign(
@@ -1789,3 +1796,14 @@ def opt_margins(
     opt_margin_time.stop()
 
     return df_opt_margins
+
+if __name__ == "__main__":
+    # df_symlots = get_symlots('NSE', False)
+    df_symlots = pd.read_pickle('./data/nse/df_symlots.pkl')
+    und_cts = df_symlots.contract.unique()
+    output = get_chains('NSE', und_cts, True, False)
+    # ct = df_symlots.contract.sample(1).iloc[0]
+    # with IB().connect('127.0.0.1', 3000, 0) as ib:
+    #     output = ib.run(chain(ib, ct))
+    
+    print(output)
