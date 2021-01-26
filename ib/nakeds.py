@@ -8,7 +8,8 @@ from ib_insync import IB, MarketOrder, util
 from dfrq import get_dfrq
 from engine import Timer, Vars, get_unds, qpAsync
 from support import (calcsdmult_df, get_col_widths, get_market, get_prec,
-                     get_prob, yes_or_no)
+                     get_prob, yes_or_no, get_col_widths)
+from openpyxl.utils import get_column_letter
 
 
 def get_nakeds(MARKET: str, 
@@ -117,6 +118,7 @@ def get_nakeds(MARKET: str,
     # price and iv
     with IB().connect(ibp.HOST, ibp.PORT, ibp.CID) as ib:
         df_pr = ib.run(qpAsync(ib, df_nakeds.contract, **{'FILL_DELAY': 5.5}))
+        ib.disconnect()
 
     # margins
     orders = [MarketOrder("SELL", lot / lot)
@@ -129,6 +131,9 @@ def get_nakeds(MARKET: str,
     from engine import executeAsync, margin, post_df
 
     with IB().connect(ibp.HOST, ibp.PORT, ibp.CID) as ib:
+
+        ib.client.setConnectOptions('PACEAPI')
+
         df_mgn = ib.run(
             executeAsync(
                 ib=ib,
@@ -150,6 +155,9 @@ def get_nakeds(MARKET: str,
                         .join(df_pr.set_index("conId")\
                             [["bid", "ask", "close", "last", "iv", "price"]])\
                                 .reset_index()
+
+    # replace nan commissions with default values
+    df_nakeds.comm.fillna(20 if MARKET == 'NSE' else 0.65, inplace=True)
 
     # update null iv with und_iv
     m_iv = df_nakeds.iv.isnull()
@@ -203,10 +211,14 @@ def get_nakeds(MARKET: str,
     # . put the order quantity
     df_nakeds["qty"] = 1 if MARKET == "SNP" else df_nakeds.lot
 
+    # . determine maxFall and maxRise for the dte
+    df_nakeds = df_nakeds.assign(maxFall = (df_nakeds.undPrice-df_nakeds.fall).clip(0, None), 
+                maxRise = (df_nakeds.undPrice+df_nakeds.rise))
+
     cols2 = ["conId", "symbol", "dte", "right", "strike", "expiry", "secType", "contract", 
-            "lot", "und_iv", "undPrice", "und_sd", "comm", "margin", "fall", "rise", "rsi",
-            "bid", "ask", "close", "last", "iv", "intrinsic", "timevalue", "price", 
-            "expPrice", "rom", "expRom", "sdMult", "prop", "remq", "qty"]
+            "lot", "und_iv", "undPrice", "und_sd", "comm", "margin", "maxFall", "maxRise", "rsi",
+            "bid", "ask", "close", "last", "iv", "intrinsic", "timevalue", "sdMult", "price", 
+            "expPrice", "rom", "expRom", "prop", "remq", "qty"]
 
     df_nakeds = df_nakeds[cols2]
 
@@ -257,19 +269,14 @@ def get_nakeds(MARKET: str,
         calls_sheet = writer.sheets["Puts"]
         sheets = [all_sheet, puts_sheet, calls_sheet]
 
-        col_width = get_col_widths(df_calls)  # set the column width
+        col_width = get_col_widths(df_calls)  # get the column width to set
 
         for sht in sheets:
-            # Hide all rows without data
-
-            sht.set_default_row(hide_unused_rows=True)
-
             for i, width in enumerate(col_width):
-                sht.set_column(i, i, width)
-
-            sht.set_column("A:A", None, None, {"hidden": True})  # Hide conId
-            sht.set_column("G:G", None, None, {"hidden": True})  # Hide secType
-            sht.set_column("H:H", None, None, {"hidden": True})  # Hide contract
+                sht.column_dimensions[get_column_letter(i+1)].width = width
+        
+            for col in ['A', 'G', 'H']:
+                sht.column_dimensions[col].hidden= True        
 
         try:
             writer.save()
@@ -292,7 +299,7 @@ if __name__ == "__main__":
 
     EARLIEST = yes_or_no("Only EARLIEST DTE? ")
 
-    RECALC_UNDS = yes_or_no("Want to recaculate underlyings? ")
+    RECALC_UNDS = yes_or_no("Want to recalculate underlyings? ")
 
     SAVE = yes_or_no("Do you want to output result to file? ")
 

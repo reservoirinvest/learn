@@ -829,7 +829,7 @@ def get_nse() -> pd.DataFrame:
     # convert expiry to period
     df_symlots = df_symlots.assign(expiryM=pd.to_datetime(
         df_symlots.expiryM.apply(lambda x: x.title()), 
-                            format="%y-%b")\
+                            format="%b-%y")\
                                 .dt.to_period("M").astype("str"))
 
     # convert lots to integers
@@ -1798,12 +1798,12 @@ def opt_margins(
     return df_opt_margins
 
 if __name__ == "__main__":
-    # df_symlots = get_symlots('NSE', False)
-    df_symlots = pd.read_pickle('./data/nse/df_symlots.pkl')
-    und_cts = df_symlots.contract.unique()
-    output = get_chains('NSE', und_cts, True, False)
+    df_symlots = get_symlots('NSE', False)
+    # df_symlots = pd.read_pickle('./data/nse/df_symlots.pkl')
+    # und_cts = df_symlots.contract.unique()
+    # output = get_chains('NSE', und_cts, True, False)
     # ct = df_symlots.contract.sample(1).iloc[0]
     # with IB().connect('127.0.0.1', 3000, 0) as ib:
     #     output = ib.run(chain(ib, ct))
     
-    print(output)
+    print(df_symlots)

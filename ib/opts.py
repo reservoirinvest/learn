@@ -36,7 +36,7 @@ def make_opts(MARKET: str,
     datapath = cwd.joinpath('data', MARKET.lower())
 
     # log
-    logfile = cwd.joinpath('data', 'log', 'opts.log')
+    logfile = cwd.joinpath('data', 'log', MARKET.lower()+'_opts.log')
     util.logToFile(path=logfile, level=30)
     with open(logfile, "w"):
         pass

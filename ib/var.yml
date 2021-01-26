@@ -44,10 +44,10 @@ NSE:
   
   PREC: 0.05
 
-  CALLSTDMULT: 1.25 # Min stdev multiple for calls
-  PUTSTDMULT: 1.3 # Min stdev multiple for puts
+  CALLSTDMULT: 1.2 # Min stdev multiple for calls
+  PUTSTDMULT: 1.2 # Min stdev multiple for puts
   
-  MINEXPROM: 2.25
+  MINEXPROM: 1.5
   MINOPTSELLPRICE: 0.05
   MAXOPTQTY_SYM: 4 # Maximum option contract quantity per symbol to trade
   
@@ -64,7 +64,6 @@ SNP:
 
   BLACKLIST:
   - VXX
-  # Following indices always fail!
   - DJX
   - SPX
   - MXEA
@@ -74,7 +73,7 @@ SNP:
   - XEO
 
   SPECIALS: # Managed manually (outside automation)
-  - TSLA # for last hour shorts
+#   - TSLA # for last hour shorts
 
   # For edge
   HONOUR_BREACH: True
@@ -85,8 +84,8 @@ SNP:
 
   PREC: 0.01
 
-  CALLSTDMULT: 1.35 # Min stdev multiple for calls
-  PUTSTDMULT: 1.45 #  Min stdev multiple for puts
+  CALLSTDMULT: 2 # Min stdev multiple for calls
+  PUTSTDMULT: 2.3 #  Min stdev multiple for puts
 
   MINEXPROM: 2.35
   MINOPTSELLPRICE: 0.35
