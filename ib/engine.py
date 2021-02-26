@@ -496,6 +496,14 @@ async def margin(ib: IB, co, **kwargs) -> pd.DataFrame:
 
             df = df_empty
 
+        except KeyError as e:
+
+            print(f"\nError: Key error for contract: {ct}, order: {o}" +
+                  f" \n...in margin wif: {wif} \n" +
+                  f"   \n..... giving error{e}")
+
+            df = df_empty
+
     else:
 
         print(

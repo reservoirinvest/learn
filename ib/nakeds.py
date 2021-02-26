@@ -77,8 +77,8 @@ def get_nakeds(MARKET: str,
     df_raw = df_raw.assign(und_sd=calcsdmult_df(df_raw.strike, df_raw.rename(columns={'und_iv':'iv'})))
 
     # ** CLIP FOR TARGETS
-
-    remq = dfrq.set_index('symbol').remq.to_dict()
+    dfrq1 = dfrq[dfrq.symbol.isin(NAKEDS)]
+    remq = dfrq1.set_index('symbol').remq.to_dict()
 
     if not DEEPDIVE:
         
@@ -112,12 +112,13 @@ def get_nakeds(MARKET: str,
     else:
         df_nakeds = df_raw.assign(remq = df_raw.symbol.map(remq))
 
+    df_nakeds = df_nakeds[~df_nakeds.contract.isnull()]
 
     # ** GET PRICE, IV AND MARGIN
 
     # price and iv
     with IB().connect(ibp.HOST, ibp.PORT, ibp.CID) as ib:
-        df_pr = ib.run(qpAsync(ib, df_nakeds.contract, **{'FILL_DELAY': 5.5}))
+        df_pr = ib.run(qpAsync(ib, df_nakeds.contract, **{'FILL_DELAY': 6.5}))
         ib.disconnect()
 
     # margins
