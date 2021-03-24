@@ -170,7 +170,7 @@ def make_opts(MARKET: str,
         )
     ]
 
-    BLK_SIZE = 200
+    BLK_SIZE = 2002
 
     # ..build the raw blocks from cts
     raw_blks = [cts[i:i + BLK_SIZE] for i in range(0, len(cts), BLK_SIZE)]
@@ -194,8 +194,12 @@ def make_opts(MARKET: str,
                 ))
 
             # Successes
-            qopts = qopts.append(pd.Series(qs, dtype=object, name="qualified"),
-                                    ignore_index=True)
+            try:
+                qopts = qopts.append(pd.Series(qs, dtype=object, name="qualified"),
+                                ignore_index=True)
+            except Exception as ve: # !!! TEMPORARY
+                print(f"qs gave error {ve} and will not be updated to qopts\n")
+
 
             # Rejects
             rejects = [c for c in b if not c.conId]
