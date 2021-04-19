@@ -268,8 +268,8 @@ def get_covers(
         )
         sht1 = writer.sheets["Covers"]
         sht2 = writer.sheets["Alternatives"]
-        sht1.set_column("A:B", None, None, {"hidden": True})
-        sht2.set_column("A:B", None, None, {"hidden": True})
+        # sht1.set_column("A:B", None, None, {"hidden": True})
+        # sht2.set_column("A:B", None, None, {"hidden": True})
         writer.save()
 
     covers_time.stop()

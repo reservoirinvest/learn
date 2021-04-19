@@ -1,97 +1,43 @@
-# * GET MAIN ACTION
-
 import os
-import platform
+import pathlib
 
-from support import get_market
+from ib_insync import util
 
+from covers import get_covers
+from engine import get_chains, get_ohlcs, get_symlots, get_unds, make_opts
+from support import Timer, Vars, get_market
 
-# . determine the action needed
-def get_action(act_ask):
-
-    # process inputs
-    while True:
-        try:
-            # check for int in input
-            get_action = int('\n' + input(act_ask) + '\n')
-        except ValueError:
-            print("\nI didn't understand what you entered. Try again!\n")
-            continue  # Loop again
-        if not get_action in act_ask_range:
-            print(f"\nWrong number! choose between {act_ask_range}...")
-        else:
-            ACT = act_dict[get_action]
-            break  # success and exit loop
-
-    # clear terminal to show selection clearly
-    if platform.system() == 'Windows':
-        os.system('cls')
-    else:
-        os.system('clear')  # on linux and os x
-
-    return ACT
-
-
-# * GET THE MARKET
 MARKET = get_market()
 
-# * DETERMINE POSSIBLE ACTIONS
-
-first_run = {0: "Quit",
-             1: "Build",
-             2: "Utilities"}
-
-nse_utils = {0: "Quit",
-             1: "Harvests",
-             2: "Watchlist"
-             }
-
-snp_utils = {0: "Quit",
-             1: "Harvests",
-             2: "Covers",
-             3: "Defends",
-             4: "Orphans",
-             9: "Delete pickles"
-             }
+ibp = Vars(MARKET.upper())
+RUN_ON_PAPER = False
+SAVE = True
+USE_YAML = True
 
 
-act_ask_range = list(range(len(act_dict)))
-act_ask = f"\nWhat is to be done for {MARKET}? Choose from following numbers:\n"
+# * SETUP LOGS AND CLEAR THEM
+THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
+LOGPATH = pathlib.Path.cwd().joinpath(THIS_FOLDER, "data", "log")
+LOGFILE = LOGPATH.joinpath(MARKET.lower() + "_all.log")
+util.logToFile(path=LOGFILE, level=30)
+with open(LOGFILE, "w"):
+    pass
 
-act_ask = act_ask + f'\n{"-" * 70}\n'
-act_ask = act_ask + "\n0) Quit the program!!\n"
+# .. start the timer
+all_time = Timer(f"All {MARKET}")
+all_time.start()
 
-act_ask = act_ask + f'\n{"_" * 25}    1. Functions    {"_" * 25}\n'
-act_ask = act_ask + \
-    "11) Build all (df_symlots, df_unds, df_ohlcs, df_chains,\n"
-act_ask = act_ask + "               qopts, df_opt_prices, df_opt_margins, \n"
-act_ask = act_ask + "               df_opts, fresh with dfrq)\n"
-act_ask = act_ask + "12) Get underlyings (df_unds)\n"
-act_ask = act_ask + "13) Qualify options (qopts)\n"
-act_ask = act_ask + "14) Get option prices (df_opt_prices)\n"
-act_ask = act_ask + "15) Get option margins (df_opt_margins)\n"
-act_ask = act_ask + "16) Build final option set (df_opts)\n"
+und_cts = get_symlots(MARKET=MARKET, RUN_ON_PAPER=RUN_ON_PAPER).contract.unique()
 
-act_ask = act_ask + f'\n{"_" * 25}    2. Utilities    {"_" * 25}\n'
+get_unds(MARKET=MARKET, und_cts=und_cts, RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
 
-act_ask = act_ask + "21) Get remaining quanities (dfrq)\n"
-act_ask = act_ask + "22) Build fresh nakeds (df_fresh)\n"
-act_ask = act_ask + "23) Determine the harvests (df_harvests)\n"
-act_ask = act_ask + "24) Make watchlist from symbols (watchlist.csv)\n"
-act_ask = act_ask + f'\n{"." * 70}\n'
-act_ask = act_ask + f"99) Delete ALL files for {MARKET}\n"
-act_ask = act_ask + f'\n{"." * 70}\n'
+get_ohlcs(MARKET=MARKET, und_cts=und_cts, RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
+
+get_chains(MARKET=MARKET, und_cts=und_cts, RUN_ON_PAPER=RUN_ON_PAPER, SAVE=True)
+
+make_opts(MARKET, USE_YAML=USE_YAML, SAVE=True, RUN_ON_PAPER=RUN_ON_PAPER)
 
 if MARKET == 'SNP':
-    act_ask = act_ask + f'\n{"." * 25}       For SNP    {"." * 25}\n'
-    act_ask = act_ask + "31) Determine the covers (df_covers)\n"
-    act_ask = act_ask + "32) Determine the orphans (df_orphans)\n"
-    act_ask = act_ask + "33) Determine the defenses (df_defend)\n"
+    get_covers(COVERSD=ibp.COVERSD, SAVEXL=SAVE, COV_DEPTH=ibp.COV_DEPTH)
 
-if MARKET == 'NSE':
-    act_ask = act_ask + f'\n{"." * 25}       For NSE    {"." * 25}\n'
-    act_ask = act_ask + "41) Build trades for CAPSTOCKS (df_capstocks)\n"
-
-# * GET THE ACTION
-ACT = get_action(act_ask)
-print(ACT)
+all_time.stop()

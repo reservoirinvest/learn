@@ -20,7 +20,15 @@ COMMON:
   - Submitted
   BAR_FORMAT: "{desc:<10}{percentage:3.0f}%|{bar:25}{r_bar}{bar:-10b}"
 
+# ----------------------------
 NSE:
+
+  CALLSTDMULT: 2 # Min stdev multiple for calls
+  PUTSTDMULT: 2 # Min stdev multiple for puts
+  MINEXPROM: 1.25
+  
+  MAXOPTQTY_SYM: 4 # Maximum option contract quantity per symbol to trade
+
   EXCHANGE: 'NSE'
   CURRENCY: 'INR'
   PORT: 3000
@@ -32,16 +40,7 @@ NSE:
   POSN_LIMIT: 0.18 # Each symbol's market value should not be greater than 18% of NLV
   BLACKLIST: # Ref: https://zerodha.com/margin-calculator/SPAN/
   - RCOM
-#   - APLLTD
-#   - ALKEM
-#   - ADANIPORT
-#   - BHARATFOR
-#   - LTTS
-#   - GUJGASLTD
-#   - INDUSTOWE
-#   - IOC
   
-
   POSN_LIMIT: 0.10 # Each symbol's market value should not be greater than 18% of NLV
   
   # For edge
@@ -53,15 +52,17 @@ NSE:
   
   PREC: 0.05
 
-  CALLSTDMULT: 2 # Min stdev multiple for calls
-  PUTSTDMULT: 2.25 # Min stdev multiple for puts
-  MINEXPROM: 1.55
-  
-
   MINOPTSELLPRICE: 0.05
-  MAXOPTQTY_SYM: 4 # Maximum option contract quantity per symbol to trade
-  
+
+# ----------------------------
 SNP:
+
+  CALLSTDMULT: 2 # Min stdev multiple for calls
+  PUTSTDMULT: 2 #  Min stdev multiple for puts
+  MINEXPROM: 1
+  
+  MAXOPTQTY_SYM: 1 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
+
   EXCHANGE: 'SMART'
   CURRENCY: 'USD'
   PORT: 1300
@@ -75,17 +76,9 @@ SNP:
   BLACKLIST:
   - VXX
   - XEO
-#   - DJX
-#   - SPX
-#   - MXEA
-#   - MXEF
-#   - XSP
-#   - OEX
 
   SPECIALS: # Managed manually (outside automation)
   - VXX
-#   - TSLA # for last hour shorts
-
 
   # For edge
   HONOUR_BREACH: True
@@ -95,15 +88,11 @@ SNP:
   # If both FALLRISE & HILO52 are selected, best of both price will be taken.
 
   PREC: 0.01
-
-  CALLSTDMULT: 1.8 # Min stdev multiple for calls
-  PUTSTDMULT: 2.2 #  Min stdev multiple for puts
-  MINEXPROM: 1.7
   
   MINOPTSELLPRICE: 0.35
-  MAXOPTQTY_SYM: 1 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
 
   COVERSD: 1.3 # For covered calls and puts
+  COV_DEPTH: 4 # How deep to go searching for the cover
   ORPHSD_CUTOFF: 1.4 # Cut-off to dispose orphans (old_sdMult)
   DEFEND_DTE: 30*5 # Min days for fresh protection / roll (e.g. 30 days x 5 months)
   DEFEND_TH: 0.2 # Protection threshold. 0.2 means underlying should be protected against 20% fall

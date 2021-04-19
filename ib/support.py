@@ -559,4 +559,14 @@ def yes_or_no(question):
 
 if __name__ == "__main__":
 
-    pass
+    MARKET = 'NSE'
+
+    from engine import Vars
+    ibp = Vars(MARKET)
+
+    with IB().connect(ibp.HOST, ibp.PORT, 2) as ib:
+        pf = quick_pf(ib)
+
+    print(pf)
+
+
