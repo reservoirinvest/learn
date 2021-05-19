@@ -143,12 +143,7 @@ def empty_trash(MARKET: str):
     do_not_delete = [
         ".keep",
         "qopts.pkl",
-        "qopt_rejects.pkl",
-        "df_symlots.pkl",
-        "df_unds.pkl",
-        "df_chains.pkl",
-        "df_ohlcs.pkl",
-        "df_opts.pkl"
+        "qopt_rejects.pkl"
     ]
 
     data_fs = os.listdir(DATAPATH)
