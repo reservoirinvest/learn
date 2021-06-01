@@ -12,10 +12,11 @@ async def keep_printing(name: str = "") -> None:
         print_now()
         await asyncio.sleep(0.5)
 
-# asyncio.run(keep_printing("first")) # continuously runs forever
+# Runs forever!
+""" asyncio.run(keep_printing("first")) """
 
-""" # waits for a timeout and creates a TimeoutError exception
-asyncio.run(asyncio.wait_for(keep_printing(), 3)) """
+# waits for a timeout and creates a nasty TimeoutError exception
+""" asyncio.run(asyncio.wait_for(keep_printing(), 3)) """
 
 
 # Let us use a main function to get into the asyncio world.

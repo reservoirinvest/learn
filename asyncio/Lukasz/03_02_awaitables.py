@@ -1,6 +1,9 @@
 # Program to show that awaitables are regular objects!
 # Ref: [EdgeDB youtube](https://youtu.be/-CzqsgaXUM8?t=629)
 
+# Awaitable and Coroutines are in collection.abc module
+# Future and Task are in asyncio patch
+
 import asyncio
 import datetime
 

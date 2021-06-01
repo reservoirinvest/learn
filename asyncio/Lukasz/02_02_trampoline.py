@@ -9,12 +9,12 @@ import asyncio
 def print_now():
     print(datetime.datetime.now())
 
+loop = asyncio.get_event_loop()
 
 def trampoline(name: str = "") -> None:
     print(name, end="")
     print_now()
     loop.call_later(0.5, trampoline, name)
-
 
 def hog():
     sum = 0
@@ -23,23 +23,29 @@ def hog():
             sum += j
     return sum
 
-
-loop = asyncio.get_event_loop()
-
-""" loop.call_soon(trampoline)
+# Run 8 times
+""" 
 loop.call_later(8, loop.stop)
 loop.run_forever() """
 
-""" # Sequential trampolines
-loop.call_soon(trampoline, "First")
+# Sequential trampolines
+""" loop.call_soon(trampoline, "First")
 loop.call_soon(trampoline, "Second")
 loop.call_soon(trampoline, "Third")
 
-loop.call_later(8, loop.stop)
+loop.call_later(8, loop.stop) """
+
+# loop.run_forever()
+
+# Running hogs
+""" loop.call_later(15, hog)
+loop.call_later(20, loop.stop)
 
 loop.run_forever() """
 
+# Running hogs later afer running trampolines soon
 # Ref: [debug section](https://youtu.be/E7Yn5biBZ58?t=1625)
+
 loop.set_debug(True)
 
 loop.call_soon(trampoline, "First")
@@ -51,4 +57,5 @@ loop.call_later(20, loop.stop)
 loop.run_forever()
 
 # generates the message:
-# ``Executing <TimerHandle when=110222.109 hog() at <stdin>:1 created at <stdin>:1> took 9.391 seconds``
+# ``Executing <TimerHandle when=110222.109 hog() at <stdin>:1 created at <stdin>:1> took 9.391 seconds`` 
+
