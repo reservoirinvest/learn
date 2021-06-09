@@ -1,6 +1,6 @@
 # !!! TEMPORARY PROGRAM AS ORDER PLACEMENT WAS NOT WORKING ON 24-MAR-2021
 
-MARKET = 'NSE'
+MARKET = 'SNP'
 import sys
 import pathlib
 import numpy as np

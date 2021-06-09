@@ -31,4 +31,4 @@ f = asyncio.Future()
 loop.call_later(3, f.set_exception, ValueError("problem encountered!"))
 res = loop.run_until_complete(get_result(f))
 print(f"\nget_result returns: {res}\n")
-print(f"\nThe result now is: {f.result()}") # This will fail the program!
+# print(f"\nThe result now is: {f.result()}") # This will fail the program!
