@@ -6,7 +6,7 @@ import pandas as pd
 from ib_insync import IB, MarketOrder, util
 
 from dfrq import get_dfrq
-from engine import Timer, Vars, get_unds, qpAsync
+from engine import Timer, Vars, get_unds, qpAsync, get_prices
 from support import (calcsdmult_df, get_col_widths, get_market, get_prec,
                      get_prob, yes_or_no, get_col_widths)
 from openpyxl.utils import get_column_letter
@@ -117,9 +117,11 @@ def get_nakeds(MARKET: str,
     # ** GET PRICE, IV AND MARGIN
 
     # price and iv
-    with IB().connect(ibp.HOST, ibp.PORT, ibp.CID) as ib:
+    """ with IB().connect(ibp.HOST, ibp.PORT, ibp.CID) as ib:
         df_pr = ib.run(qpAsync(ib, df_nakeds.contract, **{'FILL_DELAY': 6.5}))
-        ib.disconnect()
+        ib.disconnect() """
+
+    df_pr = get_prices(cts = df_nakeds.contract, MARKET=MARKET)
 
     # margins
     orders = [MarketOrder("SELL", lot / lot)

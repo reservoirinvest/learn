@@ -13,6 +13,7 @@ from collections import defaultdict, namedtuple
 from datetime import datetime
 from io import StringIO
 from typing import Callable, Coroutine, Union
+import sys
 
 import numpy as np
 import pandas as pd
@@ -625,6 +626,9 @@ async def executeAsync(
     results = set()
     remaining = pre_process(cts)
     last_len_tasks = 0  # tracking last length for error catch
+    done = set()
+
+    output = pd.DataFrame([]) # Corrected error from get_covers if it doesn't contain any scrips
 
     # Set pbar
     if SHOW_TQDM:
@@ -708,6 +712,8 @@ async def executeAsync(
 
                     tasks.difference_update(dn)
                     tasks.difference_update(pend)
+
+                    [t.cancel() for t in tasks]
 
                     pend_names = [p.get_name() for p in pend]
                     # remove pending from remaining
@@ -1180,6 +1186,10 @@ def get_unds(MARKET: str,
                 OP_FILENAME="",
                 **{"FILL_DELAY": 14.5},
             ))
+
+    if df_und_margins.empty:
+        print(f"\nNo underlying margins found for contracts: {und_cos}! Aborting!!\n")
+        sys.exit(0)
 
     df_und_margins[["conId", "margin", "comm"]]
     df_unds = df_unds.assign(conId=[c.conId for c in df_unds.contract])

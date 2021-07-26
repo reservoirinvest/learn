@@ -1,5 +1,6 @@
 # Program to generate PnL, BalanceSheet and Cashflow spreadsheets
 # picked up from yfinance (yahoo finance)
+# !! NOTE: yquery is a better one!
 
 import yfinance as yf
 import pandas as pd

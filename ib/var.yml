@@ -23,9 +23,9 @@ COMMON:
 # ----------------------------
 NSE:
 
-  CALLSTDMULT: 1.95 # Min stdev multiple for calls
-  PUTSTDMULT: 1.95 # Min stdev multiple for puts
-  MINEXPROM: 0.92
+  CALLSTDMULT: 2.27 # Min stdev multiple for calls
+  PUTSTDMULT: 2.275 # Min stdev multiple for puts
+  MINEXPROM: 1.35
   
   MAXOPTQTY_SYM: 3 # Maximum option contract quantity per symbol to trade
 
@@ -57,7 +57,7 @@ NSE:
 # ----------------------------
 SNP:
 
-  CALLSTDMULT: 2.2 # Min stdev multiple for calls
+  CALLSTDMULT: 2 # Min stdev multiple for calls
   PUTSTDMULT: 2 #  Min stdev multiple for puts
   MINEXPROM: 1.2
   
@@ -92,7 +92,7 @@ SNP:
 
   PREC: 0.01
   
-  MINOPTSELLPRICE: 0.35
+  MINOPTSELLPRICE: 0.7
 
   COVERSD: 1.3 # For covered calls and puts
   COV_DEPTH: 4 # How deep to go searching for the cover
