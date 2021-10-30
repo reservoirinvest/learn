@@ -23,9 +23,10 @@ COMMON:
 # ----------------------------
 NSE:
 
-  CALLSTDMULT: 2.2 # Min stdev multiple for calls
-  PUTSTDMULT: 2.2 # Min stdev multiple for puts
+  CALLSTDMULT: 2 # Min stdev multiple for calls
+  PUTSTDMULT: 2 # Min stdev multiple for puts
   MINEXPROM: 3
+  MINOPTSELLPRICE: 0.2
   
   MAXOPTQTY_SYM: 3 # Maximum option contract quantity per symbol to trade
 
@@ -40,6 +41,7 @@ NSE:
   POSN_LIMIT: 0.18 # Each symbol's market value should not be greater than 18% of NLV
   BLACKLIST: # Ref: https://zerodha.com/margin-calculator/SPAN/
   - RCOM
+  - IRCTC
   
   POSN_LIMIT: 0.10 # Each symbol's market value should not be greater than 18% of NLV
   
@@ -52,7 +54,7 @@ NSE:
   
   PREC: 0.05
 
-  MINOPTSELLPRICE: 0.2
+
 
 # ----------------------------
 SNP:

@@ -121,6 +121,7 @@ async def ohlc(ib: IB,
         df.insert(2, "right", c.right)
         df.insert(3, "expiry", c.lastTradeDateOrContractMonth)
 
+
     df.insert(0, "conId", c.conId)
     df.insert(1, "symbol", c.symbol)
 
