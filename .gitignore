@@ -18,10 +18,9 @@ log/*.*
 Untitled*.*
 ib/data/**/*.*
 ib/Pip*.*
+*.dump
 
 # ... don't ignore
 !ib/data/**/.keep
 !ib/data/template/*.*
 !ib/data/img/*.*
-
-

@@ -62,7 +62,7 @@ df_usd = df1[df.columns] # rever back to df's columns
 # create a Pandas Excel writer using XlsxWriter as the engine.
 dfs = {'local': df, 'usd': df_usd}
 
-writer = pd.ExcelWriter('./data/oil_mnc.xlsx', engine='xlsxwriter')
+writer = pd.ExcelWriter('./oil_mnc.xlsx', engine='xlsxwriter')
 
 for sheetname, df in dfs.items():
     df.to_excel(writer, sheet_name=sheetname, index=False, freeze_panes=(1, 1))
