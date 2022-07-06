@@ -19,8 +19,10 @@ Untitled*.*
 ib/data/**/*.*
 ib/Pip*.*
 *.dump
+plotly/iframe_figures/*.*
 
 # ... don't ignore
 !ib/data/**/.keep
 !ib/data/template/*.*
 !ib/data/img/*.*
+

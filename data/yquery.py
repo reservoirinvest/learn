@@ -8,14 +8,20 @@ from yahooquery import Ticker
 
 # Set the symbols
 symdict = dict()
-symdict['600500.SS'] = 'SINOCHEM'
-symdict['PTR'] = 'PETROCHINA'
-symdict['RDS-A'] = 'Shell'
+symdict['CC3.SI'] = 'STARHUB'
+symdict['Z74.SI'] = 'Singtel'
+# symdict['B2F.SI'] = 'M1'
+# symdict['B2F.SI'] = 'M1'
+
+
+# symdict['600500.SS'] = 'SINOCHEM'
+# symdict['PTR'] = 'PETROCHINA'
+# symdict['RDS-A'] = 'Shell'
 # symdict['2222.SR'] = 'Aramco'
-symdict['BP'] = 'BP'
-symdict['TTE'] = 'Total'
-symdict['CVX'] = 'Chevron'
-symdict['ROSN.ME'] = 'Rosneft'
+# symdict['BP'] = 'BP'
+# symdict['TTE'] = 'Total'
+# symdict['CVX'] = 'Chevron'
+# symdict['ROSN.ME'] = 'Rosneft'
 
 # Get ticker objects
 d_ticks = {det: Ticker(sym) for sym, det in symdict.items()}
@@ -62,7 +68,7 @@ df_usd = df1[df.columns] # rever back to df's columns
 # create a Pandas Excel writer using XlsxWriter as the engine.
 dfs = {'local': df, 'usd': df_usd}
 
-writer = pd.ExcelWriter('./oil_mnc.xlsx', engine='xlsxwriter')
+writer = pd.ExcelWriter('./data/telecoms.xlsx', engine='xlsxwriter')
 
 for sheetname, df in dfs.items():
     df.to_excel(writer, sheet_name=sheetname, index=False, freeze_panes=(1, 1))

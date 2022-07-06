@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.express as px
 
 import plotly.io as pio
-pio.renderers.default = 'jupyterlab'
+pio.renderers.default = 'iframe'
 
 df = pd.read_csv('http://bit.ly/drinksbycountry')
 fig = px.bar(df[['continent', 'beer_servings', 'spirit_servings']].melt(id_vars='continent'), x='continent', y='value', color='variable', barmode='group')
