@@ -1,0 +1,25 @@
+<svg width="258" height="538" xmlns="http://www.w3.org/2000/svg">
+
+ <g>
+  <title>Layer 1</title>
+  <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="24" id="svg_2" y="21" x="0.00781" stroke-width="0" stroke="#000" fill="#000000">Input</text>
+  <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="24" id="svg_3" y="523" x="0.00781" stroke-width="0" stroke="#000" fill="#000000">Output</text>
+  <g id="svg_11">
+   <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="18" id="svg_5" y="154.40721" x="57.15625" stroke-width="0" stroke="#000" fill="#000000">Send word, letter by letter</text>
+   <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="24" id="svg_6" y="125.40721" x="0" stroke-width="0" stroke="#000" fill="#000000">Stage A:</text>
+  </g>
+  <g id="svg_12">
+   <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="18" id="svg_8" y="310.14523" x="84.64844" stroke-width="0" stroke="#000" fill="#000000">Sends the letter to C</text>
+   <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="24" id="svg_9" y="261.14523" x="0.00781" stroke-width="0" stroke="#000" fill="#000000">Stage B:</text>
+   <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="18" id="svg_10" y="290.14523" x="49.50781" stroke-width="0" stroke="#000" fill="#000000">Changes letter to uppercase</text>
+  </g>
+  <g id="svg_13">
+   <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="24" id="svg_4" y="403.55693" x="0.00781" stroke-width="0" stroke="#000" fill="#000000">Stage C:</text>
+   <text xml:space="preserve" text-anchor="start" font-family="Noto Sans JP" font-size="18" id="svg_7" y="432.55693" x="74.00781" stroke-width="0" stroke="#000" fill="#000000">Accumulates the letter</text>
+  </g>
+  <path transform="rotate(90 21 466.105)" stroke="#000" id="svg_15" d="m15.25719,477.91521c-1.3535,-0.65682 -1.17593,-1.05455 2.11485,-4.73642c1.66168,-1.85915 3.02123,-3.4343 3.02123,-3.50034c0,-0.06603 -4.58847,-0.12005 -10.19663,-0.12005l-10.19663,0l0,-3.482l0,-3.482l10.27745,0c7.92449,0 10.18898,-0.1049 9.89108,-0.45816c-0.2125,-0.25199 -1.66205,-1.92413 -3.22123,-3.71587c-2.93907,-3.37747 -2.93815,-4.28322 0.00454,-4.56397c1.46447,-0.13972 24.26449,10.59523 25.04817,11.79346c-7.59449,4.27831 -16.67247,8.75661 -25.03478,12.70519c-0.44093,0 -1.20953,-0.19792 -1.70804,-0.43983l0,0z" fill="none"/>
+  <path transform="rotate(90 21.0005 68.105)" stroke="#000" id="svg_16" d="m15.25719,79.91521c-1.3535,-0.65681 -1.17592,-1.05455 2.11485,-4.73641c1.66168,-1.85916 3.02122,-3.43431 3.02122,-3.50034c0,-0.06603 -4.58847,-0.12006 -10.19663,-0.12006l-10.19663,0l0,-3.482l0,-3.482l10.27744,0c7.92449,0 10.18898,-0.1049 9.89109,-0.45816c-0.2125,-0.25199 -1.66206,-1.92413 -3.22124,-3.71587c-2.93907,-3.37747 -2.93815,-4.28322 0.00455,-4.56397c1.46446,-0.13972 24.26448,10.59523 25.04817,11.79346c-7.59449,4.27831 -16.67248,8.7566 -25.03478,12.70519c-0.44093,0 -1.20953,-0.19793 -1.70804,-0.43984l0,0z" fill="none"/>
+  <path transform="rotate(90 21.0005 170.105)" stroke="#000" id="svg_17" d="m15.25719,181.91521c-1.3535,-0.65681 -1.17592,-1.05455 2.11485,-4.73641c1.66168,-1.85916 3.02122,-3.43431 3.02122,-3.50034c0,-0.06603 -4.58847,-0.12006 -10.19663,-0.12006l-10.19663,0l0,-3.482l0,-3.482l10.27744,0c7.92449,0 10.18898,-0.1049 9.89109,-0.45816c-0.2125,-0.25199 -1.66206,-1.92413 -3.22124,-3.71587c-2.93907,-3.37747 -2.93815,-4.28322 0.00455,-4.56397c1.46446,-0.13972 24.26448,10.59523 25.04817,11.79346c-7.59449,4.27831 -16.67248,8.7566 -25.03478,12.70519c-0.44093,0 -1.20953,-0.19793 -1.70804,-0.43984l0,0z" fill="none"/>
+  <path transform="rotate(90 21.0005 337.105)" stroke="#000" id="svg_18" d="m15.25719,348.91521c-1.3535,-0.65681 -1.17592,-1.05455 2.11485,-4.73641c1.66168,-1.85916 3.02122,-3.43431 3.02122,-3.50034c0,-0.06603 -4.58847,-0.12006 -10.19663,-0.12006l-10.19663,0l0,-3.482l0,-3.482l10.27744,0c7.92449,0 10.18898,-0.1049 9.89109,-0.45816c-0.2125,-0.25199 -1.66206,-1.92413 -3.22124,-3.71587c-2.93907,-3.37747 -2.93815,-4.28322 0.00455,-4.56397c1.46446,-0.13972 24.26448,10.59523 25.04817,11.79346c-7.59449,4.27831 -16.67248,8.7566 -25.03478,12.70519c-0.44093,0 -1.20953,-0.19793 -1.70804,-0.43984l0,0z" fill="none"/>
+ </g>
+</svg>

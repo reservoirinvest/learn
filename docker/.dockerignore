@@ -1,0 +1,8 @@
+*.xlsx
+*.png
+
+.vscode
+venv
+.venv
+.git
+

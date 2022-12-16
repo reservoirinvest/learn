@@ -1,0 +1,103 @@
+---
+COMMON:
+  HOST: 127.0.0.1
+
+  # Client IDs
+  CID: 0
+  MASTER: 10 # Master client for retrieving ALL (manual and API) orders and trades
+  QUAL: 1
+  OHLC: 2
+  CHAIN: 3
+  PRICE: 4
+  MARGIN: 5
+
+  FIRST_XN_TIMEOUT: 0.5 # timeout for first connection to IB 
+  BLK: 50
+  ACTIVE_STATUS:
+  - ApiPending
+  - PendingSubmit
+  - PreSubmitted
+  - Submitted
+  BAR_FORMAT: "{desc:<10}{percentage:3.0f}%|{bar:25}{r_bar}{bar:-10b}"
+
+# ----------------------------
+NSE:
+
+  CALLSTDMULT: 1.95 # Min stdev multiple for calls
+  PUTSTDMULT: 1.9 # Min stdev multiple for puts
+  MINEXPROM: 1.55
+  MINOPTSELLPRICE: 0.2
+  
+  MAXOPTQTY_SYM: 3 # Maximum option contract quantity per symbol to trade
+
+  EXCHANGE: 'NSE'
+  CURRENCY: 'INR'
+  PORT: 3000
+  PAPER: 3001 # For paper trades in IBG
+  MINDTE: 1
+  MAXDTE: 60
+  CUSHION_LIMIT: 0.15 # Cushion should be greater than the cushion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
+  MARGIN_LIMIT: 0.7 # Initial margin should not be greater than 90% of NLV
+  POSN_LIMIT: 0.18 # Each symbol's market value should not be greater than 18% of NLV
+  BLACKLIST: # Ref: https://zerodha.com/margin-calculator/SPAN/
+  - RCOM
+  - IRCTC
+  
+  POSN_LIMIT: 0.10 # Each symbol's market value should not be greater than 18% of NLV
+  
+  # For edge
+  HONOUR_BREACH: False
+  ONLYPUTS: False
+  FALLRISE: False # Flag to use fall rise as band
+  HILO52: False # Flag to use hilo52 as band.
+  # If both FALLRISE & HILO52 are selected, best of both price will be taken.
+  
+  PREC: 0.05
+
+
+
+# ----------------------------
+SNP:
+
+  CALLSTDMULT: 2 # Min stdev multiple for calls
+  PUTSTDMULT: 2 #  Min stdev multiple for puts
+  MINEXPROM: 1.2
+  
+  MAXOPTQTY_SYM: 1 # Maximum option contract quantity per symbol to trade in either direction (Call / Put)
+
+  EXCHANGE: 'SMART'
+  CURRENCY: 'USD'
+  PORT: 1300
+  PAPER: 1301 # For paper trades in IBG
+  MINDTE: 1
+  MAXDTE: 35
+  CUSHION_LIMIT: 0.3 # Cushion should be greater than the custion limit. Cushion = (Equity with Loan Value - Maintenance Margin)/NLV
+  MARGIN_LIMIT: 0.7 # Initial margin should not be greater than 70% of NLV
+  POSN_LIMIT: 0.04 # Each symbol's market value should not be greater than 4% of NLV
+
+  BLACKLIST:
+  - VXX
+  - XEO
+  - GOOG
+  - GOOGL
+  - BKNG
+
+  SPECIALS: # Managed manually (outside automation)
+  - VXX
+
+  # For edge
+  HONOUR_BREACH: True
+  ONLYPUTS: False
+  FALLRISE: False # Flag to use fall rise as band
+  HILO52: False # Flag to use hilo52 as band.
+  # If both FALLRISE & HILO52 are selected, best of both price will be taken.
+
+  PREC: 0.01
+  
+  MINOPTSELLPRICE: 0.7
+
+  COVERSD: 1.3 # For covered calls and puts
+  COV_DEPTH: 4 # How deep to go searching for the cover
+  ORPHSD_CUTOFF: 1.4 # Cut-off to dispose orphans (old_sdMult)
+  DEFEND_DTE: 30*5 # Min days for fresh protection / roll (e.g. 30 days x 5 months)
+  DEFEND_TH: 0.2 # Protection threshold. 0.2 means underlying should be protected against 20% fall

@@ -1,0 +1,25 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+autopep8 = "*"
+ipykernel = "*"
+
+[packages]
+ib-insync = "*"
+pyyaml = "*"
+requests = "*"
+pandas = "*"
+md-mermaid = "*"
+markdown = "*"
+ipykernel = "*"
+nest-asyncio = "*"
+lxml = "*"
+ta = "*"
+tqdm = "*"
+scipy = "*"
+
+[requires]
+python_version = "*"

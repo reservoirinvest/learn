@@ -1,0 +1,6 @@
+# depslib dependency file v1.0
+1574533278 source:c:\dev\match_lock\main.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+
