@@ -20,6 +20,7 @@ The objective of this repository is to be a knowledge base:
 * [asyncio](./asyncio/) - asynchronous programming in python
   
 # Other tools   
+* [small online svgs](https://svgedit.netlify.app/editor/index.html) - to make quick svgs
 * [mermaid](./mermaid/) - illustration while coding
 * [git](./git/) - info on git flow
 * [docker](./docker/) - playing with docker
